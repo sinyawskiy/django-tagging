@@ -166,16 +166,26 @@ def edit_string_for_tags(tags):
     resulting string of tag names will be comma-delimited, otherwise
     it will be space-delimited.
     """
+    quote_chars = ',:='
+    fields = {'namespace': '', 'name': '', 'value': ''}
     names = []
     use_commas = False
     for tag in tags:
-        name = tag.name
-        if u',' in name:
-            names.append('"%s"' % name)
-            continue
-        elif u' ' in name:
-            if not use_commas:
+        for field in fields:
+            fields[field] = getattr(tag, field) or ''
+            quoted = False
+            for char in quote_chars:
+                if char in fields[field]:
+                    fields[field] = '"%s"' % fields[field]
+                    quoted = True
+                    break
+            if not quoted and ' ' in fields[field]:
                 use_commas = True
+        name = fields['name']
+        if fields['namespace']:
+            name = '%s:%s' % (fields['namespace'], name)
+        if fields['value']:
+            name = '%s=%s' % (name, fields['value'])
         names.append(name)
     if use_commas:
         glue = u', '
@@ -264,13 +274,33 @@ def get_tag(tag):
 
     try:
         if isinstance(tag, types.StringTypes):
-            return Tag.objects.get(name=tag)
+            return Tag.objects.get(**get_tag_parts(tag))
         elif isinstance(tag, (types.IntType, types.LongType)):
             return Tag.objects.get(id=tag)
     except Tag.DoesNotExist:
         pass
 
     return None
+
+RE_TAG_PARTS = re.compile(
+    r'(?:(?P<namespace>"[^"]+"|[^:="]+):)?'
+    r'(?P<name>"[^"]+"|[^="]+)'
+    r'(?:=(?P<value>"[^"]+"|[^"]+))?'
+)
+
+def get_tag_parts(tag):
+    """
+    Utility function for accepting single tag string representation that are
+    returned from the ``parse_tag_input`` function.
+
+    It returns a dictionary with the keys ``namespace``, ``name`` and
+    ``value``. The values have no quotes.
+    """
+    parts = RE_TAG_PARTS.match(tag).groupdict()
+    for key, value in parts.items():
+        if value and value[0] == value[-1] == '"':
+            parts[key] = value[1:-1]
+    return parts
 
 # Font size distribution algorithms
 LOGARITHMIC, LINEAR = 1, 2

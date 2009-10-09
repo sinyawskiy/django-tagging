@@ -14,7 +14,7 @@ from django.db.models.query import QuerySet
 from django.utils.translation import ugettext_lazy as _
 
 from tagging import settings
-from tagging.utils import calculate_cloud, get_tag_list, get_queryset_and_model, normalize_tag_part, parse_tag_input
+from tagging.utils import calculate_cloud, get_tag_list, get_tag_parts, get_queryset_and_model, normalize_tag_part, parse_tag_input
 from tagging.utils import LOGARITHMIC
 
 qn = connection.ops.quote_name
@@ -37,16 +37,16 @@ class TagManager(models.Manager):
 
         # Remove tags which no longer apply
         tags_for_removal = [tag for tag in current_tags \
-                            if tag.name not in updated_tag_names]
+                            if unicode(tag) not in updated_tag_names]
         if len(tags_for_removal):
             TaggedItem._default_manager.filter(content_type__pk=ctype.pk,
                                                object_id=obj.pk,
                                                tag__in=tags_for_removal).delete()
         # Add new tags
-        current_tag_names = [tag.name for tag in current_tags]
+        current_tag_names = [unicode(tag) for tag in current_tags]
         for tag_name in updated_tag_names:
             if tag_name not in current_tag_names:
-                tag, created = self.get_or_create(name=tag_name)
+                tag, created = self.get_or_create(**get_tag_parts(tag_name))
                 TaggedItem._default_manager.create(tag=tag, object=obj)
 
     def add_tag(self, obj, tag_name):
@@ -61,7 +61,7 @@ class TagManager(models.Manager):
         tag_name = tag_names[0]
         if settings.FORCE_LOWERCASE_TAGS:
             tag_name = tag_name.lower()
-        tag, created = self.get_or_create(name=tag_name)
+        tag, created = self.get_or_create(**get_tag_parts(tag_name))
         ctype = ContentType.objects.get_for_model(obj)
         TaggedItem._default_manager.get_or_create(
             tag=tag, content_type=ctype, object_id=obj.pk)

@@ -8,7 +8,7 @@ from tagging.forms import TagField
 from tagging import settings
 from tagging.models import Tag, TaggedItem
 from tagging.tests.models import Article, Link, Perch, Parrot, FormTest
-from tagging.utils import calculate_cloud, edit_string_for_tags, get_tag_list, get_tag, parse_tag_input
+from tagging.utils import calculate_cloud, edit_string_for_tags, get_tag_list, get_tag_parts, get_tag, parse_tag_input
 from tagging.utils import LINEAR
 
 #############
@@ -267,6 +267,49 @@ class TestCalculateCloud(TestCase):
         else:
             raise self.failureException('a ValueError exception was supposed to be raised!')
 
+class TestGetTag(TestCase):
+    def setUp(self):
+        self.foo_tag = Tag.objects.create(name='foo')
+        self.foobar_tag = Tag.objects.create(name='foo:bar')
+        self.barbaz_tag = Tag.objects.create(name='bar=baz')
+        self.bar_baz_tag = Tag.objects.create(name='bar', value='baz')
+        self.foo_bar_tag = Tag.objects.create(name='bar', namespace='foo')
+        self.foo_bar_baz_tag = Tag.objects.create(name='bar', namespace='foo', value='baz')
+        self.one_tag = Tag.objects.create(name='two three', namespace='one', value='four')
+        self.sign_tag = Tag.objects.create(name=':=', namespace=':=', value=':=')
+        
+    def test_simple_tags(self):
+        self.failUnless(get_tag('foo'), self.foo_tag)
+        self.failUnless(get_tag('"foo:bar"'), self.foobar_tag)
+        self.failUnless(get_tag('foo:bar'), self.foo_bar_tag)
+        self.failUnless(get_tag('"bar=baz"'), self.barbaz_tag)
+        self.failUnless(get_tag('bar=baz'), self.bar_baz_tag)
+        self.failUnless(get_tag('foo:bar=baz'), self.bar_baz_tag)
+        self.failUnless(get_tag('"foo":"bar"="baz"'), self.bar_baz_tag)
+        self.failUnless(get_tag('one:"two three"=four'), self.one_tag)
+        self.failUnless(get_tag('":=":":="=":="'), self.sign_tag)
+
+class TestGetTagParts(TestCase):
+    def test_simple_cases(self):
+        self.assertEquals(get_tag_parts('bar'),
+            {'namespace': None, 'name': 'bar', 'value': None})
+        self.assertEquals(get_tag_parts('foo:bar'),
+            {'namespace': 'foo', 'name': 'bar', 'value': None})
+        self.assertEquals(get_tag_parts('bar=baz'),
+            {'namespace': None, 'name': 'bar', 'value': 'baz'})
+        self.assertEquals(get_tag_parts('foo:bar=baz'),
+            {'namespace': 'foo', 'name': 'bar', 'value': 'baz'})
+        self.assertEquals(get_tag_parts(' foo: bar =baz '),
+            {'namespace': ' foo', 'name': ' bar ', 'value': 'baz '})
+
+    def test_with_quotes(self):
+        self.assertEquals(get_tag_parts('"bar="'),
+            {'namespace': None, 'name': 'bar=', 'value': None})
+        self.assertEquals(get_tag_parts('":="'),
+            {'namespace': None, 'name': ':=', 'value': None})
+        self.assertEquals(get_tag_parts('":=":":="=":="'),
+            {'namespace': ':=', 'name': ':=', 'value': ':='})
+
 #########
 # Model #
 #########
@@ -307,6 +350,22 @@ class TestBasicTagging(TestCase):
         self.failUnless(get_tag('bar') in tags)
         self.failUnless(get_tag('baz') in tags)
         self.failUnless(get_tag('foo') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, '"foo":bar "baz"')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, '"foo":bar="baz"')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('foo:bar=baz') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'bar="baz"')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('bar=baz') in tags)
     
     def test_add_tag(self):
         # start off in a known, mildly interesting state
@@ -333,6 +392,52 @@ class TestBasicTagging(TestCase):
         self.failUnless(get_tag('bar') in tags)
         self.failUnless(get_tag('baz') in tags)
         self.failUnless(get_tag('foo') in tags)
+
+        # try to add a tag that has the same name of an existing but a
+        # different namespace and a tag that looks the same but quoted
+        Tag.objects.add_tag(self.dead_parrot, 'foo:bar')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 5)
+        self.failUnless(get_tag('zip') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        
+        # try to add a tag that looks like an already existent namespaced tag
+        # but is quoted
+        Tag.objects.add_tag(self.dead_parrot, '"foo:bar"')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 6)
+        self.failUnless(get_tag('zip') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('"foo:bar"') in tags)
+        
+        # now add a tag with namespace that already exists
+        Tag.objects.add_tag(self.dead_parrot, 'foo:bar')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 6)
+        self.failUnless(get_tag('zip') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('"foo:bar"') in tags)
+        
+        # add a tag with namespace and value
+        Tag.objects.add_tag(self.dead_parrot, 'foo:bar=baz')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 7)
+        self.failUnless(get_tag('zip') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('"foo:bar"') in tags)
+        self.failUnless(get_tag('"foo":"bar"="baz"') in tags)
     
     def test_add_tag_invalid_input_no_tags_specified(self):
         # start off in a known, mildly interesting state
@@ -408,16 +513,18 @@ class TestModelTagField(TestCase):
     """ Test the 'tags' field on models. """
     
     def test_create_with_tags_specified(self):
-        f1 = FormTest.objects.create(tags=u'test3 test2 test1')
+        f1 = FormTest.objects.create(tags=u'test3 test2 test1 one:"two three"=four')
         tags = Tag.objects.get_for_object(f1)
         test1_tag = get_tag('test1')
         test2_tag = get_tag('test2')
         test3_tag = get_tag('test3')
-        self.failUnless(None not in (test1_tag, test2_tag, test3_tag))
-        self.assertEquals(len(tags), 3)
+        one_tag = get_tag('one:"two three"=four')
+        self.failUnless(None not in (test1_tag, test2_tag, test3_tag, one_tag))
+        self.assertEquals(len(tags), 4)
         self.failUnless(test1_tag in tags)
         self.failUnless(test2_tag in tags)
         self.failUnless(test3_tag in tags)
+        self.failUnless(one_tag in tags)
     
     def test_update_via_tags_field(self):
         f1 = FormTest.objects.create(tags=u'test3 test2 test1')
@@ -437,6 +544,13 @@ class TestModelTagField(TestCase):
         test4_tag = get_tag('test4')
         self.assertEquals(len(tags), 1)
         self.assertEquals(tags[0], test4_tag)
+        
+        f1.tags = u'foo:bar'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        foo_bar_tag = get_tag('foo:bar')
+        self.assertEquals(len(tags), 1)
+        self.assertEquals(tags[0], foo_bar_tag)
         
         f1.tags = ''
         f1.save()
@@ -490,6 +604,16 @@ class TestSettings(TestCase):
         self.failUnless(foo_tag in tags)
         self.failUnless(zip_tag in tags)
         
+        Tag.objects.add_tag(self.dead_parrot, 'Foo:bAr=ziP')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 5)
+        foo_bar_zip_tag = get_tag('foo:bar=zip')
+        self.failUnless(bar_tag in tags)
+        self.failUnless(baz_tag in tags)
+        self.failUnless(foo_tag in tags)
+        self.failUnless(zip_tag in tags)
+        self.failUnless(foo_bar_zip_tag in tags)
+        
         f1 = FormTest.objects.create()
         f1.tags = u'TEST5'
         f1.save()
@@ -498,6 +622,15 @@ class TestSettings(TestCase):
         self.assertEquals(len(tags), 1)
         self.failUnless(test5_tag in tags)
         self.assertEquals(f1.tags, u'test5')
+        
+        f1.tags = u'TEST5 FOO:BAR=TAR'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        foo_bar_tar_tag = get_tag('foo:bar=tar')
+        self.assertEquals(len(tags), 2)
+        self.failUnless(test5_tag in tags)
+        self.failUnless(foo_bar_tar_tag in tags)
+        self.assertEquals(f1.tags, u'test5 foo:bar=tar')
 
 class TestTagUsageForModelBaseCase(TestCase):
     def test_tag_usage_for_model_empty(self):
@@ -950,11 +1083,20 @@ class TestTagFieldInForms(TestCase):
         plain = Tag.objects.create(name='plain')
         spaces = Tag.objects.create(name='spa ces')
         comma = Tag.objects.create(name='com,ma')
+        colon = Tag.objects.create(name='co:lon')
+        equal = Tag.objects.create(name='equa=l')
+        spaces_namespace = Tag.objects.create(name='foo', namespace='spa ces')
+        spaces_colon_namespace = Tag.objects.create(name='foo', namespace='spa ces,colon')
         self.assertEquals(edit_string_for_tags([plain]), u'plain')
         self.assertEquals(edit_string_for_tags([plain, spaces]), u'plain, spa ces')
         self.assertEquals(edit_string_for_tags([plain, spaces, comma]), u'plain, spa ces, "com,ma"')
         self.assertEquals(edit_string_for_tags([plain, comma]), u'plain "com,ma"')
         self.assertEquals(edit_string_for_tags([comma, spaces]), u'"com,ma", spa ces')
+        self.assertEquals(edit_string_for_tags([plain, colon]), u'plain "co:lon"')
+        self.assertEquals(edit_string_for_tags([equal, colon]), u'"equa=l" "co:lon"')
+        self.assertEquals(edit_string_for_tags([equal, spaces, colon]), u'"equa=l", spa ces, "co:lon"')
+        self.assertEquals(edit_string_for_tags([plain, spaces_namespace]), u'plain, spa ces:foo')
+        self.assertEquals(edit_string_for_tags([plain, spaces_colon_namespace]), u'plain "spa ces,colon":foo')
     
     def test_tag_d_validation(self):
         t = TagField()
