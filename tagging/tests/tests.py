@@ -32,7 +32,7 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('=one=two :three:four'),
             [u'"three:four"', u'one=two'])
         self.assertEquals(parse_tag_input(':=one:two=three=:'),
-            [u'"one:two"=three'])
+            [u'"one:two"="three=:"'])
         self.assertEquals(parse_tag_input('second:one first:one'),
             [u'first:one', u'second:one'])
         self.assertEquals(parse_tag_input('first:one first:two'),
@@ -86,6 +86,8 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('one:"two three"'), [u'one:two three'])
         self.assertEquals(parse_tag_input('"one:"two"=three"'), [u'"one:two=three"'])
         self.assertEquals(parse_tag_input('"one:"two"=three'), [u'"one:two"=three'])
+        self.assertEquals(parse_tag_input(':"=one":two=three=:'),
+            [u'"=one:two"="three=:"'])
     
     def test_with_no_loose_commas(self):
         """ Test with no loose commas -- split on spaces. """
@@ -118,7 +120,7 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input(',,,,,,'), [])
         self.assertEquals(parse_tag_input('",",",",",",","'), [u','])
         self.assertEquals(parse_tag_input(':'), [])
-        self.assertEquals(parse_tag_input(':' * 7), [])
+        self.assertEquals(parse_tag_input(':::::::'), [u'"::::::"'])
         self.assertEquals(parse_tag_input('='), [])
         self.assertEquals(parse_tag_input('=' * 7), [])
         self.assertEquals(parse_tag_input(':,:,=,=,:,=,:,='), [])
@@ -264,7 +266,25 @@ class TestCalculateCloud(TestCase):
                 (str(type(e)), str(e)))
         else:
             raise self.failureException('a ValueError exception was supposed to be raised!')
-        
+
+#########
+# Model #
+#########
+
+class TestTagModel(TestCase):
+    def test_unicode_behaviour(self):
+        self.assertEqual(unicode(Tag(name='foo')), u'foo')
+        self.assertEqual(unicode(Tag(namespace='foo', name='bar')), u'foo:bar')
+        self.assertEqual(unicode(Tag(name='foo', value='bar')), u'foo=bar')
+        self.assertEqual(unicode(Tag(namespace='foo', name='bar', value='baz')), u'foo:bar=baz')
+        self.assertEqual(unicode(Tag(name='foo:bar')), u'"foo:bar"')
+        self.assertEqual(unicode(Tag(name='foo:bar=baz')), u'"foo:bar=baz"')
+        self.assertEqual(unicode(Tag(namespace='spam', name='foo:bar=baz')), u'spam:"foo:bar=baz"')
+        self.assertEqual(unicode(Tag(namespace='spam', name='foo:bar=baz', value='egg')), u'spam:"foo:bar=baz"=egg')
+        self.assertEqual(unicode(Tag(namespace='spam:egg', name='foo:bar=baz')), u'"spam:egg":"foo:bar=baz"')
+        self.assertEqual(unicode(Tag(name='foo:bar=baz', value='spam:egg')), u'"foo:bar=baz"="spam:egg"')
+        self.assertEqual(unicode(Tag(namespace=':', name=':=', value='=')), u'":":":="="="')
+
 ###########
 # Tagging #
 ###########

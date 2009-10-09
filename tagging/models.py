@@ -14,7 +14,7 @@ from django.db.models.query import QuerySet
 from django.utils.translation import ugettext_lazy as _
 
 from tagging import settings
-from tagging.utils import calculate_cloud, get_tag_list, get_queryset_and_model, parse_tag_input
+from tagging.utils import calculate_cloud, get_tag_list, get_queryset_and_model, normalize_tag_part, parse_tag_input
 from tagging.utils import LOGARITHMIC
 
 qn = connection.ops.quote_name
@@ -85,7 +85,7 @@ class TagManager(models.Manager):
         model_table = qn(model._meta.db_table)
         model_pk = '%s.%s' % (model_table, qn(model._meta.pk.column))
         query = """
-        SELECT DISTINCT %(tag)s.id, %(tag)s.name%(count_sql)s
+        SELECT DISTINCT %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value%(count_sql)s
         FROM
             %(tag)s
             INNER JOIN %(tagged_item)s
@@ -95,9 +95,9 @@ class TagManager(models.Manager):
             %%s
         WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
             %%s
-        GROUP BY %(tag)s.id, %(tag)s.name
+        GROUP BY %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value
         %%s
-        ORDER BY %(tag)s.name ASC""" % {
+        ORDER BY %(tag)s.namespace, %(tag)s.name, %(tag)s.value ASC""" % {
             'tag': qn(self.model._meta.db_table),
             'count_sql': counts and (', COUNT(%s)' % model_pk) or '',
             'tagged_item': qn(TaggedItem._meta.db_table),
@@ -115,9 +115,9 @@ class TagManager(models.Manager):
         cursor.execute(query % (extra_joins, extra_criteria, min_count_sql), params)
         tags = []
         for row in cursor.fetchall():
-            t = self.model(*row[:2])
+            t = self.model(*row[:4])
             if counts:
-                t.count = row[2]
+                t.count = row[4]
             tags.append(t)
         return tags
 
@@ -188,7 +188,7 @@ class TagManager(models.Manager):
         tag_count = len(tags)
         tagged_item_table = qn(TaggedItem._meta.db_table)
         query = """
-        SELECT %(tag)s.id, %(tag)s.name%(count_sql)s
+        SELECT %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value%(count_sql)s
         FROM %(tagged_item)s INNER JOIN %(tag)s ON %(tagged_item)s.tag_id = %(tag)s.id
         WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
           AND %(tagged_item)s.object_id IN
@@ -202,7 +202,7 @@ class TagManager(models.Manager):
               HAVING COUNT(%(tagged_item)s.object_id) = %(tag_count)s
           )
           AND %(tag)s.id NOT IN (%(tag_id_placeholders)s)
-        GROUP BY %(tag)s.id, %(tag)s.name
+        GROUP BY %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value
         %(min_count_sql)s
         ORDER BY %(tag)s.name ASC""" % {
             'tag': qn(self.model._meta.db_table),
@@ -222,9 +222,9 @@ class TagManager(models.Manager):
         cursor.execute(query, params)
         related = []
         for row in cursor.fetchall():
-            tag = self.model(*row[:2])
+            tag = self.model(*row[:4])
             if counts is True:
-                tag.count = row[2]
+                tag.count = row[4]
             related.append(tag)
         return related
 
@@ -447,17 +447,27 @@ class Tag(models.Model):
     """
     A tag.
     """
-    name = models.CharField(_('name'), max_length=50, unique=True, db_index=True)
+    namespace = models.CharField(_('namespace'), max_length=50,
+        null=True, blank=True, db_index=True)
+    name = models.CharField(_('name'), max_length=50, db_index=True)
+    value = models.CharField(_('namespace'), max_length=50,
+        null=True, blank=True, db_index=True)
 
     objects = TagManager()
 
     class Meta:
-        ordering = ('name',)
+        unique_together = (('namespace', 'name', 'value'),)
+        ordering = ('namespace', 'name', 'value')
         verbose_name = _('tag')
         verbose_name_plural = _('tags')
 
     def __unicode__(self):
-        return self.name
+        name = normalize_tag_part(self.name)
+        if self.namespace:
+            name = '%s:%s' % (normalize_tag_part(self.namespace), name)
+        if self.value:
+            name = '%s=%s' % (name, normalize_tag_part(self.value))
+        return name
 
 class TaggedItem(models.Model):
     """

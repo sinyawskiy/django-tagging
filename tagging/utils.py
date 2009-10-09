@@ -23,8 +23,6 @@ RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
 
 RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
 
-RE_NORMALIZE_TAG_PART = re.compile(r'^[:=]*(.*?)[:=]*$')
-
 def parse_tag_input(input):
     """
     Parses tag input, with multiple word input being activated and
@@ -136,11 +134,7 @@ def normalize_tag_part(input, stop_chars=':='):
     Takes a namespace, name or value and removes trailing colons and equals.
     Adds quotes around each part that contains a colon or equals sign.
     """
-    if not input:
-        return ''
-    input = RE_NORMALIZE_TAG_PART.match(input).groups()[0]
-    if input:
-        input = input.replace('"', '')
+    input = input.replace('"', '')
     if not input:
         return ''
     for char in stop_chars:
