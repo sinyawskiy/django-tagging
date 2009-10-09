@@ -16,12 +16,14 @@ try:
 except NameError:
     from sets import Set as set
 
-RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'(?:(?:"[^"]*"|[^,\s]+)+)')
+RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'[:=]|"[^"]*"|[^,\s:="]+')
 RE_SPACE_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s+")
 RE_COMMA_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s*,\s*")
 RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
 
 RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
+
+RE_NORMALIZE_TAG_PART = re.compile(r'^[:=]*(.*?)[:=]*$')
 
 def parse_tag_input(input):
     """
@@ -47,7 +49,7 @@ def parse_tag_input(input):
 
     token_list = []
     token_definition = (
-        (RE_STRING_TOKEN, 'string'),
+        (RE_TAG_PART_TOKEN, 'part'),
         (RE_SPACE_TOKEN, 'space'),
         (RE_COMMA_TOKEN, 'comma'),
         (RE_CHAR_TOKEN, 'char'),
@@ -87,30 +89,60 @@ def parse_tag_input(input):
 def build_tag(tokens):
     """
     Gets a list of strings and chars and builds a tag with correctly quoted
-    namespaces, names and values.
+    namespace, name and values. If there is no namespace or value the part will
+    be ignored.
     """
-    namespace, name, value = [], [], []
-    tokens = [token.replace('"','') for token in tokens]
+    left, lms, middle, mrs, right = [], None, [], None, []
     if ':' not in tokens and '=' not in tokens:
-        return add_quotes(''.join(tokens))
-    try:
-        pos = tokens.index('=')
-        tokens, value = tokens[:pos], tokens[pos+1:]
-    except ValueError:
-        pass
-    try:
-        pos = tokens.index(':')
-        namespace, tokens = tokens[:pos], tokens[pos+1:]
-    except ValueError:
-        pass
-    name = add_quotes(''.join(tokens))
-    if value:
-        name = "%s=%s" % (name, add_quotes(''.join(value)))
+        return normalize_tag_part(''.join(tokens))
+    for token in tokens:
+        if lms is None:
+            if token == ':':
+                lms = ':'
+            elif token == '=':
+                if left:
+                    lms = '='
+            else:
+                left.append(token)
+        elif lms == ':':
+            if mrs is None:
+                if token == '=':
+                    if middle:
+                        mrs = '='
+                else:
+                    middle.append(token)
+            else:
+                right.append(token)
+        elif lms == '=':
+            middle.append(token)
+    if lms == '=':
+        namespace, name, value = [], left, middle
+    else:
+        if middle:
+            namespace, name, value = left, middle, right
+        else:
+            namespace, name, value = [], left, []
+    namespace = normalize_tag_part(''.join(namespace))
+    name = normalize_tag_part(''.join(name))
+    value = normalize_tag_part(''.join(value))
     if namespace:
-        name = "%s:%s" % (add_quotes(''.join(namespace)), name)
+        name = "%s:%s" % (namespace, name)
+    if value:
+        name = "%s=%s" % (name, value)
     return name
 
-def add_quotes(input, stop_chars=':='):
+def normalize_tag_part(input, stop_chars=':='):
+    """
+    Takes a namespace, name or value and removes trailing colons and equals.
+    Adds quotes around each part that contains a colon or equals sign.
+    """
+    if not input:
+        return ''
+    input = RE_NORMALIZE_TAG_PART.match(input).groups()[0]
+    if input:
+        input = input.replace('"', '')
+    if not input:
+        return ''
     for char in stop_chars:
         if char in input:
             return '"%s"' % input

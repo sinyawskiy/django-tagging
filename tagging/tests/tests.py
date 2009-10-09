@@ -23,14 +23,16 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('one two'), [u'one', u'two'])
         self.assertEquals(parse_tag_input('one two three'), [u'one', u'three', u'two'])
         self.assertEquals(parse_tag_input('one one two two'), [u'one', u'two'])
-
-    def test_with_simple_space_delimited_machine_tags(self):
-        """ Test with simple space-delimited machine tags. """
-
         self.assertEquals(parse_tag_input('first:one'), [u'first:one'])
         self.assertEquals(parse_tag_input('first:one two'), [u'first:one', u'two'])
-        self.assertEquals(parse_tag_input('one second:two :three'),
+        self.assertEquals(parse_tag_input('one= second:two :three'),
             [u'one', u'second:two', u'three'])
+        self.assertEquals(parse_tag_input(':one= :two= =three:'),
+            [u'one', u'three', u'two'])
+        self.assertEquals(parse_tag_input('=one=two :three:four'),
+            [u'"three:four"', u'one=two'])
+        self.assertEquals(parse_tag_input(':=one:two=three=:'),
+            [u'"one:two"=three'])
         self.assertEquals(parse_tag_input('second:one first:one'),
             [u'first:one', u'second:one'])
         self.assertEquals(parse_tag_input('first:one first:two'),
@@ -52,7 +54,9 @@ class TestParseTagInput(TestCase):
             
         self.assertEquals(parse_tag_input(',one'), [u'one'])
         self.assertEquals(parse_tag_input(',one two'), [u'one two'])
+        self.assertEquals(parse_tag_input('one two,'), [u'one two'])
         self.assertEquals(parse_tag_input(',one two three'), [u'one two three'])
+        self.assertEquals(parse_tag_input('one two three,'), [u'one two three'])
         self.assertEquals(parse_tag_input('a-one, a-two and a-three'),
             [u'a-one', u'a-two and a-three'])
         self.assertEquals(parse_tag_input('a:one, a:two and a=three'),
@@ -67,19 +71,31 @@ class TestParseTagInput(TestCase):
             A completed quote will trigger this.  Unclosed quotes are ignored. """
             
         self.assertEquals(parse_tag_input('"one'), [u'one'])
+        self.assertEquals(parse_tag_input('one"'), [u'one'])
         self.assertEquals(parse_tag_input('"one two'), [u'one', u'two'])
         self.assertEquals(parse_tag_input('"one two three'), [u'one', u'three', u'two'])
         self.assertEquals(parse_tag_input('"one two"'), [u'one two'])
         self.assertEquals(parse_tag_input('a-one "a-two and a-three"'),
             [u'a-one', u'a-two and a-three'])
+        self.assertEquals(parse_tag_input('"one""two" "three"'), [u'onetwo', u'three'])
+        self.assertEquals(parse_tag_input('":one'), [u'one'])
+        self.assertEquals(parse_tag_input('one="'), [u'one'])
+        self.assertEquals(parse_tag_input('"one:two"'), [u'"one:two"'])
+        self.assertEquals(parse_tag_input('one:"two three"'), [u'one:two three'])
+        self.assertEquals(parse_tag_input('"one:"two"=three"'), [u'"one:two=three"'])
+        self.assertEquals(parse_tag_input('"one:"two"=three'), [u'"one:two"=three'])
     
     def test_with_no_loose_commas(self):
         """ Test with no loose commas -- split on spaces. """
         self.assertEquals(parse_tag_input('one two "thr,ee"'), [u'one', u'thr,ee', u'two'])
+        self.assertEquals(parse_tag_input('one two:"thr,ee"'), [u'one', u'two:thr,ee'])
+        self.assertEquals(parse_tag_input('one:two three=four'), [u'one:two', u'three=four'])
         
     def test_with_loose_commas(self):
         """ Loose commas - split on commas """
         self.assertEquals(parse_tag_input('"one", two three'), [u'one', u'two three'])
+        self.assertEquals(parse_tag_input('"one", two:three four=five'),
+            [u'one', u'two:three four=five'])
         
     def test_tags_with_double_quotes_can_contain_commas(self):
         """ Double quotes can contain commas """
@@ -99,6 +115,13 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('"' * 7), [])
         self.assertEquals(parse_tag_input(',,,,,,'), [])
         self.assertEquals(parse_tag_input('",",",",",",","'), [u','])
+        self.assertEquals(parse_tag_input(':'), [])
+        self.assertEquals(parse_tag_input(':' * 7), [])
+        self.assertEquals(parse_tag_input('='), [])
+        self.assertEquals(parse_tag_input('=' * 7), [])
+        self.assertEquals(parse_tag_input(':,:,=,=,:,=,:,='), [])
+        self.assertEquals(parse_tag_input(':= := =: =: : = = :'), [])
+        self.assertEquals(parse_tag_input('":":":":"="="=":"="'), [u'":":"::="="=:="'])
         self.assertEquals(parse_tag_input('a-one "a-two" and "a-three'),
             [u'a-one', u'a-three', u'a-two', u'and'])
         
