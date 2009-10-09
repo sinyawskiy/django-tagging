@@ -47,6 +47,8 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('first:one=two'), [u'first:one=two'])
         self.assertEquals(parse_tag_input('second:one=three first:one=two'),
             [u'first:one=two', u'second:one=three'])
+        self.assertEquals(parse_tag_input('first:one:two=three:four=five'),
+            [u'first:"one:two"="three:four=five"'])
     
     def test_with_comma_delimited_multiple_words(self):
         """ Test with comma-delimited multiple words.
