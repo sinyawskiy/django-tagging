@@ -2,6 +2,7 @@
 Tagging utilities - from user tag input parsing to tag cloud
 calculation.
 """
+import re
 import math
 import types
 
@@ -14,6 +15,13 @@ try:
     set
 except NameError:
     from sets import Set as set
+
+RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'(?:(?:"[^"]*"|[^,\s]+)+)')
+RE_SPACE_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s+")
+RE_COMMA_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s*,\s*")
+RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
+
+RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
 
 def parse_tag_input(input):
     """
@@ -28,62 +36,85 @@ def parse_tag_input(input):
 
     input = force_unicode(input)
 
-    # Special case - if there are no commas or double quotes in the
+    # Special case - if there are no commas, colons or double quotes in the
     # input, we don't *do* a recall... I mean, we know we only need to
     # split on spaces.
-    if u',' not in input and u'"' not in input:
+    if u',' not in input and u'"' not in input and \
+        ':' not in input and '=' not in input:
         words = list(set(split_strip(input, u' ')))
         words.sort()
         return words
 
-    words = []
-    buffer = []
-    # Defer splitting of non-quoted sections until we know if there are
-    # any unquoted commas.
-    to_be_split = []
+    token_list = []
+    token_definition = (
+        (RE_STRING_TOKEN, 'string'),
+        (RE_SPACE_TOKEN, 'space'),
+        (RE_COMMA_TOKEN, 'comma'),
+        (RE_CHAR_TOKEN, 'char'),
+    )
     saw_loose_comma = False
-    open_quote = False
-    i = iter(input)
-    try:
-        while 1:
-            c = i.next()
-            if c == u'"':
-                if buffer:
-                    to_be_split.append(u''.join(buffer))
-                    buffer = []
-                # Find the matching quote
-                open_quote = True
-                c = i.next()
-                while c != u'"':
-                    buffer.append(c)
-                    c = i.next()
-                if buffer:
-                    word = u''.join(buffer).strip()
-                    if word:
-                        words.append(word)
-                    buffer = []
-                open_quote = False
-            else:
-                if not saw_loose_comma and c == u',':
+    while input:
+        for token, name in token_definition:
+            m = token.match(input)
+            if m:
+                content, input = m.groups()
+                token_list.append((name, content))
+                if name == 'comma':
                     saw_loose_comma = True
-                buffer.append(c)
-    except StopIteration:
-        # If we were parsing an open quote which was never closed treat
-        # the buffer as unquoted.
-        if buffer:
-            if open_quote and u',' in buffer:
-                saw_loose_comma = True
-            to_be_split.append(u''.join(buffer))
-    if to_be_split:
-        if saw_loose_comma:
-            delimiter = u','
+                break
+
+    if saw_loose_comma:
+        delimiter = 'comma'
+    else:
+        delimiter = 'space'
+    words = set()
+    word = []
+    for token, content in token_list:
+        if token == delimiter:
+            word = build_tag(word)
+            if word:
+                words.add(word)
+            word = []
         else:
-            delimiter = u' '
-        for chunk in to_be_split:
-            words.extend(split_strip(chunk, delimiter))
-    words = list(set(words))
+            word.append(content)
+    word = build_tag(word)
+    if word:
+        words.add(word)
+    words = list(words)
     words.sort()
     return words
+
+def build_tag(tokens):
+    """
+    Gets a list of strings and chars and builds a tag with correctly quoted
+    namespaces, names and values.
+    """
+    namespace, name, value = [], [], []
+    tokens = [token.replace('"','') for token in tokens]
+    if ':' not in tokens and '=' not in tokens:
+        return add_quotes(''.join(tokens))
+    try:
+        pos = tokens.index('=')
+        tokens, value = tokens[:pos], tokens[pos+1:]
+    except ValueError:
+        pass
+    try:
+        pos = tokens.index(':')
+        namespace, tokens = tokens[:pos], tokens[pos+1:]
+    except ValueError:
+        pass
+    name = add_quotes(''.join(tokens))
+    if value:
+        name = "%s=%s" % (name, add_quotes(''.join(value)))
+    if namespace:
+        name = "%s:%s" % (add_quotes(''.join(namespace)), name)
+    return name
+
+def add_quotes(input, stop_chars=':='):
+    for char in stop_chars:
+        if char in input:
+            return '"%s"' % input
+    return input
 
 def split_strip(input, delimiter=u','):
     """

@@ -23,6 +23,28 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('one two'), [u'one', u'two'])
         self.assertEquals(parse_tag_input('one two three'), [u'one', u'three', u'two'])
         self.assertEquals(parse_tag_input('one one two two'), [u'one', u'two'])
+
+    def test_with_simple_space_delimited_machine_tags(self):
+        """ Test with simple space-delimited machine tags. """
+
+        self.assertEquals(parse_tag_input('first:one'), [u'first:one'])
+        self.assertEquals(parse_tag_input('first:one two'), [u'first:one', u'two'])
+        self.assertEquals(parse_tag_input('one second:two :three'),
+            [u'one', u'second:two', u'three'])
+        self.assertEquals(parse_tag_input('second:one first:one'),
+            [u'first:one', u'second:one'])
+        self.assertEquals(parse_tag_input('first:one first:two'),
+            [u'first:one', u'first:two'])
+        self.assertEquals(parse_tag_input('first:one first:one second:one'),
+            [u'first:one', u'second:one'])
+        self.assertEquals(parse_tag_input('one=two'), [u'one=two'])
+        self.assertEquals(parse_tag_input('three=four one=two'),
+            [u'one=two', u'three=four'])
+        self.assertEquals(parse_tag_input('one=two one=three'),
+            [u'one=three', u'one=two'])
+        self.assertEquals(parse_tag_input('first:one=two'), [u'first:one=two'])
+        self.assertEquals(parse_tag_input('second:one=three first:one=two'),
+            [u'first:one=two', u'second:one=three'])
     
     def test_with_comma_delimited_multiple_words(self):
         """ Test with comma-delimited multiple words.
@@ -33,6 +55,12 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input(',one two three'), [u'one two three'])
         self.assertEquals(parse_tag_input('a-one, a-two and a-three'),
             [u'a-one', u'a-two and a-three'])
+        self.assertEquals(parse_tag_input('a:one, a:two and a=three'),
+            [u'a:one', u'a:two and a=three'])
+        self.assertEquals(parse_tag_input('a:one, a:two and a:three'),
+            [u'a:"two and a:three"', u'a:one'])
+        self.assertEquals(parse_tag_input('a:one, a:one=two a:one=two'),
+            [u'a:one', u'a:one="two a:one=two"'])
     
     def test_with_double_quoted_multiple_words(self):
         """ Test with double-quoted multiple words.
@@ -894,7 +922,7 @@ class TestTagFieldInForms(TestCase):
         try:
             t.clean('foo qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvbn bar')
         except forms.ValidationError, ve:
-            self.assertEquals(unicode(ve), u"[u'Each tag may be no more than 50 characters long.']")
+            self.assertEquals(unicode(list(ve.messages)), u"[u'Each tag may be no more than 50 characters long.']")
         except Exception, e:
             raise e
         else:
