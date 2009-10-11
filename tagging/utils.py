@@ -6,6 +6,7 @@ import re
 import math
 import types
 
+from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.utils.encoding import force_unicode
 from django.utils.translation import ugettext as _
@@ -160,7 +161,7 @@ def edit_string_for_tags(tags):
     given string representation back without changing it will give the
     same list of tags.
 
-    Tag names which contain commas will be double quoted.
+    Parts of tags which contain commas will be double quoted.
 
     If any tag name which isn't being quoted contains whitespace, the
     resulting string of tag names will be comma-delimited, otherwise
@@ -232,7 +233,10 @@ def get_tag_list(tags):
     elif isinstance(tags, QuerySet) and tags.model is Tag:
         return tags
     elif isinstance(tags, types.StringTypes):
-        return Tag.objects.filter(name__in=parse_tag_input(tags))
+        q = get_tag_filter_lookup(tags)
+        if q is None:
+            return []
+        return Tag.objects.filter(q)
     elif isinstance(tags, (types.ListType, types.TupleType)):
         if len(tags) == 0:
             return tags
@@ -246,8 +250,10 @@ def get_tag_list(tags):
                 contents.add('int')
         if len(contents) == 1:
             if 'string' in contents:
-                return Tag.objects.filter(name__in=[force_unicode(tag) \
-                                                    for tag in tags])
+                q = get_tag_filter_lookup([force_unicode(tag) for tag in tags])
+                if q is None:
+                    return []
+                return Tag.objects.filter(q)
             elif 'tag' in contents:
                 return tags
             elif 'int' in contents:
@@ -256,6 +262,37 @@ def get_tag_list(tags):
             raise ValueError(_('If a list or tuple of tags is provided, they must all be tag names, Tag objects or Tag ids.'))
     else:
         raise ValueError(_('The tag input given was invalid.'))
+
+def get_tag_filter_lookup(tags):
+    """
+    Takes a user entered string or an iteratable of strings and returns a
+    a ``Q`` object that matches all given tags.
+
+    Returns ``None`` if no valid tag name is found in the strings.
+    """
+    if isinstance(tags, types.StringTypes):
+        tags = parse_tag_input(tags)
+    else:
+        tag_parsed = set()
+        for tag in tags:
+            tag_parsed.update(parse_tag_input(tag))
+        tags = tag_parsed
+    tags = [get_tag_parts(tag) for tag in tags]
+    tag_names, tag_parts = [], []
+    for tag in tags:
+        if not tag['namespace'] and not tag['value']:
+            tag_names.append(tag['name'])
+        else:
+            tag_parts.append(tag)
+    q = None
+    if len(tag_names):
+        q = Q(name__in=tag_names)
+    for tag in tag_parts:
+        if q is None:
+            q = Q(**tag)
+        else:
+            q = q | Q(**tag)
+    return q
 
 def get_tag(tag):
     """
@@ -348,3 +385,24 @@ def calculate_cloud(tags, steps=4, distribution=LOGARITHMIC):
                     tag.font_size = i + 1
                     font_set = True
     return tags
+
+def check_tag_length(tag_parts):
+    """
+    Checks the length of the tag parts according to the settings. The lengths
+    are checked for each single part and the sum of the lengths of all parts.
+    The delimiters for namespace and value (':' and '=') are not counted. They
+    are not part of the tag.
+    """
+    from tagging import settings
+    namespace_len = len(tag_parts['namespace'] or '')
+    name_len = len(tag_parts['name'] or '')
+    value_len = len(tag_parts['value'] or '')
+    tag_len = name_len + namespace_len + value_len
+    if tag_len > settings.MAX_TAG_LENGTH:
+        raise ValueError("Tag is too long.", 'tag', settings.MAX_TAG_LENGTH)
+    if name_len > settings.MAX_TAG_NAME_LENGTH:
+        raise ValueError("Tag's name part is too long.", 'name', settings.MAX_TAG_NAME_LENGTH)
+    if namespace_len > settings.MAX_TAG_NAMESPACE_LENGTH:
+        raise ValueError("Tag's namespace part is too long.", 'namespace', settings.MAX_TAG_NAMESPACE_LENGTH)
+    if value_len > settings.MAX_TAG_VALUE_LENGTH:
+        raise ValueError("Tag's value part is too long.", 'value', settings.MAX_TAG_VALUE_LENGTH)

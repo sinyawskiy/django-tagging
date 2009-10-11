@@ -6,22 +6,45 @@ from django.utils.translation import ugettext as _
 
 from tagging import settings
 from tagging.models import Tag
-from tagging.utils import parse_tag_input
+from tagging.utils import check_tag_length, get_tag_parts, parse_tag_input
 
 class TagAdminForm(forms.ModelForm):
     class Meta:
         model = Tag
 
-    def clean_name(self):
-        value = self.cleaned_data['name']
-        tag_names = parse_tag_input(value)
-        if len(tag_names) > 1:
-            raise forms.ValidationError(_('Multiple tags were given.'))
-        elif len(tag_names[0]) > settings.MAX_TAG_LENGTH:
+    def _clean_field(self, field_name, max_length, error_msg):
+        value = self.cleaned_data[field_name]
+        if '"' in value:
             raise forms.ValidationError(
-                _('A tag may be no more than %s characters long.') %
-                    settings.MAX_TAG_LENGTH)
+                _("""The '"' character is not allowed."""))
+        if max_length > 0 and len(value) > max_length:
+            raise forms.ValidationError(error_msg % max_length)
         return value
+
+    def clean(self):
+        if settings.MAX_TAG_LENGTH:
+            total_length = sum(
+                len(self.cleaned_data['namespace']),
+                len(self.cleaned_data['name']),
+                len(self.cleaned_data['value']),
+            )
+            if total_length > settings.MAX_TAG_LENGTH:
+                raise forms.ValidationError(
+                    _('A tag may be no more than %s characters long.') %
+                        settings.MAX_TAG_LENGTH)
+        return self.cleaned_data
+
+    def clean_namespace(self):
+        return self._clean_field('namespace', settings.MAX_TAG_NAMESPACE_LENGTH,
+             _('A tag\'s namespace may be no more than %s characters long.'))
+
+    def clean_name(self):
+        return self._clean_field('name', settings.MAX_TAG_NAME_LENGTH,
+            _('A tag\'s name may be no more than %s characters long.'))
+
+    def clean_value(self):
+        return self._clean_field('value', settings.MAX_TAG_VALUE_LENGTH,
+            _('A tag\'s value may be no more than %s characters long.'))
 
 class TagField(forms.CharField):
     """
@@ -33,8 +56,20 @@ class TagField(forms.CharField):
         if value == u'':
             return value
         for tag_name in parse_tag_input(value):
-            if len(tag_name) > settings.MAX_TAG_LENGTH:
-                raise forms.ValidationError(
-                    _('Each tag may be no more than %s characters long.') %
-                        settings.MAX_TAG_LENGTH)
+            try:
+                check_tag_length(get_tag_parts(tag_name))
+            except ValueError, e:
+                if len(e.args) < 3:
+                    raise
+                part, max_len = e.args[1:3]
+                if part == 'tag':
+                    raise forms.ValidationError(_('Each tag may be no more than %s characters long.') % max_len)
+                elif part == 'namespace':
+                    raise forms.ValidationError(_('Each tag\'s namespace may be no more than %s characters long.') % max_len)
+                elif part == 'name':
+                    raise forms.ValidationError(_('Each tag\'s name may be no more than %s characters long.') % max_len)
+                elif part == 'value':
+                    raise forms.ValidationError(_('Each tag\'s value may be no more than %s characters long.') % max_len)
+                else:
+                    raise
         return value

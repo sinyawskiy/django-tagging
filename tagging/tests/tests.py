@@ -8,7 +8,7 @@ from tagging.forms import TagField
 from tagging import settings
 from tagging.models import Tag, TaggedItem
 from tagging.tests.models import Article, Link, Perch, Parrot, FormTest
-from tagging.utils import calculate_cloud, edit_string_for_tags, get_tag_list, get_tag_parts, get_tag, parse_tag_input
+from tagging.utils import calculate_cloud, check_tag_length, edit_string_for_tags, get_tag_list, get_tag_parts, get_tag, parse_tag_input, split_strip
 from tagging.utils import LINEAR
 
 #############
@@ -128,35 +128,95 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('":":":":"="="=":"="'), [u'":":"::="="=:="'])
         self.assertEquals(parse_tag_input('a-one "a-two" and "a-three'),
             [u'a-one', u'a-three', u'a-two', u'and'])
-        
+
+class TestSplitStrip(TestCase):
+    def test_with_empty_input(self):
+        self.assertEquals(split_strip(' foo '), [u'foo'])
+        self.assertEquals(split_strip(' foo , bar '), [u'foo', u'bar'])
+        self.assertEquals(split_strip(', foo , bar ,'), [u'foo', u'bar'])
+        self.assertEquals(split_strip(None), [])
+    
+    def test_with_different_whitespace(self):
+        self.assertEquals(split_strip(' foo\t,\nbar '), [u'foo', u'bar'])
+
+    def test_with_athor_delimiter(self):
+        self.assertEquals(split_strip(' foo bar ', ' '), [u'foo', u'bar'])
+    
+    def test_non_empty_input(self):
+        self.assertEquals(split_strip(''), [])
+        self.assertEquals(split_strip(None), [])
+
 class TestNormalisedTagListInput(TestCase):
     def setUp(self):
         self.cheese = Tag.objects.create(name='cheese')
         self.toast = Tag.objects.create(name='toast')
-        
+        self.spam_egg = Tag.objects.create(namespace='spam', name='egg')
+    
     def test_single_tag_object_as_input(self):
         self.assertEquals(get_tag_list(self.cheese), [self.cheese])
+    
+    def test_single_string_as_input(self):
+        ret = get_tag_list('cheese')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.cheese in ret)
+        ret = get_tag_list('spam:egg')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.spam_egg in ret)
     
     def test_space_delimeted_string_as_input(self):
         ret = get_tag_list('cheese toast')
         self.assertEquals(len(ret), 2)
         self.failUnless(self.cheese in ret)
         self.failUnless(self.toast in ret)
-        
+    
     def test_comma_delimeted_string_as_input(self):
         ret = get_tag_list('cheese,toast')
         self.assertEquals(len(ret), 2)
         self.failUnless(self.cheese in ret)
         self.failUnless(self.toast in ret)
     
+    def test_namespaced_string_as_input(self):
+        ret = get_tag_list('cheese spam:egg')
+        self.assertEquals(len(ret), 2)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.spam_egg in ret)
+    
+    def test_invalid_string_as_input(self):
+        ret = get_tag_list('=')
+        self.assertEquals(len(ret), 0)
+        ret = get_tag_list(':')
+        self.assertEquals(len(ret), 0)
+        ret = get_tag_list('"":""=""')
+        self.assertEquals(len(ret), 0)
+    
+    def test_list_of_invalid_string_as_input(self):
+        ret = get_tag_list([''])
+        self.assertEquals(len(ret), 0)
+        ret = get_tag_list(['='])
+        self.assertEquals(len(ret), 0)
+        ret = get_tag_list([':'])
+        self.assertEquals(len(ret), 0)
+        ret = get_tag_list(['"":""=""'])
+        self.assertEquals(len(ret), 0)
+    
     def test_with_empty_list(self):
         self.assertEquals(get_tag_list([]), [])
+
+    def test_with_single_tag_instance(self):
+        ret = get_tag_list(self.cheese)
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.cheese in ret)
     
     def test_list_of_two_strings(self):
         ret = get_tag_list(['cheese', 'toast'])
         self.assertEquals(len(ret), 2)
         self.failUnless(self.cheese in ret)
         self.failUnless(self.toast in ret)
+    
+        ret = get_tag_list(['cheese', 'spam:egg'])
+        self.assertEquals(len(ret), 2)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.spam_egg in ret)
     
     def test_list_of_tag_primary_keys(self):
         ret = get_tag_list([self.cheese.id, self.toast.id])
@@ -213,6 +273,7 @@ class TestNormalisedTagListInput(TestCase):
 
     def test_with_tag_instance(self):
         self.assertEquals(get_tag(self.cheese), self.cheese)
+        self.assertEquals(get_tag(self.cheese), self.cheese)
     
     def test_with_string(self):
         self.assertEquals(get_tag('cheese'), self.cheese)
@@ -227,8 +288,8 @@ class TestCalculateCloud(TestCase):
     def setUp(self):
         self.tags = []
         for line in open(os.path.join(os.path.dirname(__file__), 'tags.txt')).readlines():
-            name, count = line.rstrip().split()
-            tag = Tag(name=name)
+            parts, count = line.rstrip().split()
+            tag = Tag(**get_tag_parts(parts))
             tag.count = int(count)
             self.tags.append(tag)
     
@@ -309,6 +370,61 @@ class TestGetTagParts(TestCase):
             {'namespace': None, 'name': ':=', 'value': None})
         self.assertEquals(get_tag_parts('":=":":="=":="'),
             {'namespace': ':=', 'name': ':=', 'value': ':='})
+
+class TestCheckTagLength(TestCase):
+    def setUp(self):
+        self.original_max_tag_length = settings.MAX_TAG_LENGTH
+        self.original_max_tag_name_length = settings.MAX_TAG_NAME_LENGTH
+        self.original_max_tag_namespace_length = settings.MAX_TAG_NAMESPACE_LENGTH
+        self.original_max_tag_value_length = settings.MAX_TAG_VALUE_LENGTH
+    
+    def tearDown(self):
+        settings.MAX_TAG_LENGTH = self.original_max_tag_length
+        settings.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
+        settings.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
+        settings.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
+    
+    def test_total_tag_length(self):
+        settings.MAX_TAG_LENGTH = 50
+        settings.MAX_TAG_NAME_LENGTH = 40
+        settings.MAX_TAG_NAMESPACE_LENGTH = 10
+        settings.MAX_TAG_VALUE_LENGTH = 10
+        try:
+            check_tag_length({'namespace': None, 'name': 'a' * 40, 'value': None})
+        except Exception, e:
+            self.fail(e)
+        try:
+            check_tag_length({'namespace': None, 'name': 'a' * 41, 'value': None})
+            self.fail()
+        except ValueError, ve:
+            self.assertEquals(ve.args[1], 'name')
+        try:
+            check_tag_length({'namespace': 'a' * 10, 'name': 'a', 'value': None})
+        except Exception, e:
+            self.fail(e)
+        try:
+            check_tag_length({'namespace': 'a' * 11, 'name': 'a', 'value': None})
+            self.fail()
+        except ValueError, ve:
+            self.assertEquals(ve.args[1], 'namespace')
+        try:
+            check_tag_length({'namespace': None, 'name': 'a', 'value': 'a' * 10})
+        except Exception, e:
+            self.fail(e)
+        try:
+            check_tag_length({'namespace': None, 'name': 'a', 'value': 'a' * 11})
+            self.fail()
+        except ValueError, ve:
+            self.assertEquals(ve.args[1], 'value')
+        try:
+            check_tag_length({'namespace': 'a' * 10, 'name': 'a' * 30, 'value': 'a' * 10})
+        except Exception, e:
+            self.fail(e)
+        try:
+            check_tag_length({'namespace': 'a' * 10, 'name': 'a' * 30, 'value': 'a' * 11})
+            self.fail()
+        except ValueError, ve:
+            self.assertEquals(ve.args[1], 'tag')
 
 #########
 # Model #
@@ -448,15 +564,17 @@ class TestBasicTagging(TestCase):
         self.failUnless(get_tag('baz') in tags)
         self.failUnless(get_tag('foo') in tags)
         
-        try:
-            Tag.objects.add_tag(self.dead_parrot, '    ')
-        except AttributeError, ae:
-            self.assertEquals(str(ae), 'No tags were given: "    ".')
-        except Exception, e:
-            raise self.failureException('the wrong type of exception was raised: type [%s] value [%s]' %\
-                (str(type(e)), str(e)))
-        else:
-            raise self.failureException('an AttributeError exception was supposed to be raised!')
+        invalid_input = ['     ', ':', '=', ':=']
+        for input in invalid_input:
+            try:
+                Tag.objects.add_tag(self.dead_parrot, input)
+            except AttributeError, ae:
+                self.assertEquals(str(ae), 'No tags were given: "%s".' % input)
+            except Exception, e:
+                raise self.failureException('the wrong type of exception was raised: type [%s] value [%s]' %\
+                    (str(type(e)), str(e)))
+            else:
+                raise self.failureException('an AttributeError exception was supposed to be raised!')
         
     def test_add_tag_invalid_input_multiple_tags_specified(self):
         # start off in a known, mildly interesting state
@@ -639,10 +757,10 @@ class TestTagUsageForModelBaseCase(TestCase):
 class TestTagUsageForModel(TestCase):
     def setUp(self):
         parrot_details = (
-            ('pining for the fjords', 9, True,  'foo bar'),
+            ('pining for the fjords', 9, True,  'foo bar foo:bar=egg'),
             ('passed on',             6, False, 'bar baz ter'),
-            ('no more',               4, True,  'foo ter'),
-            ('late',                  2, False, 'bar ter'),
+            ('no more',               4, True,  'foo ter foo:bar=egg'),
+            ('late',                  2, False, 'bar ter foo:bar'),
         )
         
         for state, perch_size, perch_smelly, tags in parrot_details:
@@ -652,75 +770,84 @@ class TestTagUsageForModel(TestCase):
     
     def test_tag_usage_for_model(self):
         tag_usage = Tag.objects.usage_for_model(Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 6)
         self.failUnless((u'bar', 3) in relevant_attribute_list)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
         self.failUnless((u'ter', 3) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 2) in relevant_attribute_list)
+        self.failUnless((u'foo:bar', 1) in relevant_attribute_list)
     
     def test_tag_usage_for_model_with_min_count(self):
         tag_usage = Tag.objects.usage_for_model(Parrot, min_count = 2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 4)
         self.failUnless((u'bar', 3) in relevant_attribute_list)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
         self.failUnless((u'ter', 3) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 2) in relevant_attribute_list)
     
     def test_tag_usage_with_filter_on_model_objects(self):
         tag_usage = Tag.objects.usage_for_model(Parrot, counts=True, filters=dict(state='no more'))
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 2)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 3)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, counts=True, filters=dict(state__startswith='p'))
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, counts=True, filters=dict(perch__size__gt=4))
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, counts=True, filters=dict(perch__smelly=True))
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 4)
         self.failUnless((u'bar', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, min_count=2, filters=dict(perch__smelly=True))
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 1)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 2)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, filters=dict(perch__size__gt=4))
-        relevant_attribute_list = [(tag.name, hasattr(tag, 'counts')) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'counts')) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', False) in relevant_attribute_list)
         self.failUnless((u'baz', False) in relevant_attribute_list)
         self.failUnless((u'foo', False) in relevant_attribute_list)
         self.failUnless((u'ter', False) in relevant_attribute_list)
+        self.failUnless((u'foo:bar=egg', False) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_model(Parrot, filters=dict(perch__size__gt=99))
-        relevant_attribute_list = [(tag.name, hasattr(tag, 'counts')) for tag in tag_usage]
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'counts')) for tag in tag_usage]
         self.assertEquals(len(relevant_attribute_list), 0)
 
 class TestTagsRelatedForModel(TestCase):
     def setUp(self):
         parrot_details = (
-            ('pining for the fjords', 9, True,  'foo bar'),
+            ('pining for the fjords', 9, True,  'foo bar spam:egg=ham'),
             ('passed on',             6, False, 'bar baz ter'),
-            ('no more',               4, True,  'foo ter'),
-            ('late',                  2, False, 'bar ter'),
+            ('no more',               4, True,  'foo ter spam:egg=ham'),
+            ('late',                  2, False, 'bar ter spam:foo'),
         )
         
         for state, perch_size, perch_smelly, tags in parrot_details:
@@ -730,70 +857,109 @@ class TestTagsRelatedForModel(TestCase):
             
     def test_related_for_model_with_tag_query_sets_as_input(self):
         related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['bar']), Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['bar']), Parrot, min_count=2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
         self.assertEquals(len(relevant_attribute_list), 1)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['bar']), Parrot, counts=False)
-        relevant_attribute_list = [tag.name for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 3)
-        self.failUnless(u'baz' in relevant_attribute_list)
-        self.failUnless(u'foo' in relevant_attribute_list)
-        self.failUnless(u'ter' in relevant_attribute_list)
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'count')) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 5)
+        self.failUnless((u'baz', False) in relevant_attribute_list)
+        self.failUnless((u'foo', False) in relevant_attribute_list)
+        self.failUnless((u'ter', False) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', False) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', False) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['bar', 'ter']), Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 1)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 2)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['bar', 'ter', 'baz']), Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
         self.assertEquals(len(relevant_attribute_list), 0)
         
+        related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['foo']), Parrot, counts=True)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 0)
+
+        related_tags = Tag.objects.related_for_model(Tag.objects.filter(name__in=['foo'], namespace=None), Parrot, counts=True)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 3)
+        self.failUnless((u'bar', 1) in relevant_attribute_list)
+        self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 2) in relevant_attribute_list)
+
+        related_tags = Tag.objects.related_for_model(Tag.objects.filter(namespace__in=['spam']), Parrot, counts=True)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 0)
+
+        related_tags = Tag.objects.related_for_model(Tag.objects.filter(value__in=['ham']), Parrot, counts=True)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 3)
+        self.failUnless((u'bar', 1) in relevant_attribute_list)
+        self.failUnless((u'foo', 2) in relevant_attribute_list)
+        self.failUnless((u'ter', 1) in relevant_attribute_list)
+
     def test_related_for_model_with_tag_strings_as_input(self):
         # Once again, with feeling (strings)
         related_tags = Tag.objects.related_for_model('bar', Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
+        
+        related_tags = Tag.objects.related_for_model('spam:egg=ham', Parrot, counts=True)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 3)
+        self.failUnless((u'foo', 2) in relevant_attribute_list)
+        self.failUnless((u'bar', 1) in relevant_attribute_list)
+        self.failUnless((u'ter', 1) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model('bar', Parrot, min_count=2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
         self.assertEquals(len(relevant_attribute_list), 1)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model('bar', Parrot, counts=False)
-        relevant_attribute_list = [tag.name for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 3)
-        self.failUnless(u'baz' in relevant_attribute_list)
-        self.failUnless(u'foo' in relevant_attribute_list)
-        self.failUnless(u'ter' in relevant_attribute_list)
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'count')) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 5)
+        self.failUnless((u'baz', False) in relevant_attribute_list)
+        self.failUnless((u'foo', False) in relevant_attribute_list)
+        self.failUnless((u'ter', False) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', False) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', False) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(['bar', 'ter'], Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
-        self.assertEquals(len(relevant_attribute_list), 1)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
+        self.assertEquals(len(relevant_attribute_list), 2)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
         related_tags = Tag.objects.related_for_model(['bar', 'ter', 'baz'], Parrot, counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in related_tags]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in related_tags]
         self.assertEquals(len(relevant_attribute_list), 0)
         
 class TestGetTaggedObjectsByModel(TestCase):
     def setUp(self):
         parrot_details = (
-            ('pining for the fjords', 9, True,  'foo bar'),
+            ('pining for the fjords', 9, True,  'foo bar spam:egg=ham'),
             ('passed on',             6, False, 'bar baz ter'),
-            ('no more',               4, True,  'foo ter'),
-            ('late',                  2, False, 'bar ter'),
+            ('no more',               4, True,  'foo ter spam:egg=ham'),
+            ('late',                  2, False, 'bar ter spam:foo'),
         )
         
         for state, perch_size, perch_smelly, tags in parrot_details:
@@ -801,10 +967,12 @@ class TestGetTaggedObjectsByModel(TestCase):
             parrot = Parrot.objects.create(state=state, perch=perch)
             Tag.objects.update_tags(parrot, tags)
             
-        self.foo = Tag.objects.get(name='foo')
-        self.bar = Tag.objects.get(name='bar')
-        self.baz = Tag.objects.get(name='baz')
-        self.ter = Tag.objects.get(name='ter')
+        self.foo = Tag.objects.get(namespace=None, name='foo', value=None)
+        self.bar = Tag.objects.get(namespace=None, name='bar', value=None)
+        self.baz = Tag.objects.get(namespace=None, name='baz', value=None)
+        self.ter = Tag.objects.get(namespace=None, name='ter', value=None)
+        self.spameggham = Tag.objects.get(namespace='spam', name='egg', value='ham')
+        self.spamfoo = Tag.objects.get(namespace='spam', name='foo', value=None)
         
         self.pining_for_the_fjords_parrot = Parrot.objects.get(state='pining for the fjords')
         self.passed_on_parrot = Parrot.objects.get(state='passed on')
@@ -844,9 +1012,11 @@ class TestGetTaggedObjectsByModel(TestCase):
         parrots = TaggedItem.objects.get_by_model(Parrot, Tag.objects.filter(name__in=['foo', 'baz']))
         self.assertEquals(len(parrots), 0)
         
-        parrots = TaggedItem.objects.get_by_model(Parrot, Tag.objects.filter(name__in=['foo', 'bar']))
-        self.assertEquals(len(parrots), 1)
+        parrots = TaggedItem.objects.get_by_model(Parrot, Tag.objects.filter(name__in=['bar']))
+        self.assertEquals(len(parrots), 3)
         self.failUnless(self.pining_for_the_fjords_parrot in parrots)
+        self.failUnless(self.passed_on_parrot in parrots)
+        self.failUnless(self.late_parrot in parrots)
         
         parrots = TaggedItem.objects.get_by_model(Parrot, Tag.objects.filter(name__in=['bar', 'ter']))
         self.assertEquals(len(parrots), 2)
@@ -857,9 +1027,11 @@ class TestGetTaggedObjectsByModel(TestCase):
         parrots = TaggedItem.objects.get_by_model(Parrot, 'foo baz')
         self.assertEquals(len(parrots), 0)
         
-        parrots = TaggedItem.objects.get_by_model(Parrot, 'foo bar')
-        self.assertEquals(len(parrots), 1)
+        parrots = TaggedItem.objects.get_by_model(Parrot, 'bar')
+        self.assertEquals(len(parrots), 3)
         self.failUnless(self.pining_for_the_fjords_parrot in parrots)
+        self.failUnless(self.passed_on_parrot in parrots)
+        self.failUnless(self.late_parrot in parrots)
         
         parrots = TaggedItem.objects.get_by_model(Parrot, 'bar ter')
         self.assertEquals(len(parrots), 2)
@@ -870,9 +1042,11 @@ class TestGetTaggedObjectsByModel(TestCase):
         parrots = TaggedItem.objects.get_by_model(Parrot, ['foo', 'baz'])
         self.assertEquals(len(parrots), 0)
         
-        parrots = TaggedItem.objects.get_by_model(Parrot, ['foo', 'bar'])
-        self.assertEquals(len(parrots), 1)
+        parrots = TaggedItem.objects.get_by_model(Parrot, ['bar'])
+        self.assertEquals(len(parrots), 3)
         self.failUnless(self.pining_for_the_fjords_parrot in parrots)
+        self.failUnless(self.passed_on_parrot in parrots)
+        self.failUnless(self.late_parrot in parrots)
         
         parrots = TaggedItem.objects.get_by_model(Parrot, ['bar', 'ter'])
         self.assertEquals(len(parrots), 2)
@@ -898,24 +1072,17 @@ class TestGetTaggedObjectsByModel(TestCase):
         self.failUnless(self.passed_on_parrot in parrots)
         self.failUnless(self.pining_for_the_fjords_parrot in parrots)
         
+        parrots = TaggedItem.objects.get_union_by_model(Parrot, ['spam:foo', 'baz'])
+        self.assertEquals(len(parrots), 2)
+        self.failUnless(self.passed_on_parrot in parrots)
+        self.failUnless(self.late_parrot in parrots)
+        
         # Issue 114 - Union with non-existant tags
         parrots = TaggedItem.objects.get_union_by_model(Parrot, [])
         self.assertEquals(len(parrots), 0)
 
 class TestGetRelatedTaggedItems(TestCase):
     def setUp(self):
-        parrot_details = (
-            ('pining for the fjords', 9, True,  'foo bar'),
-            ('passed on',             6, False, 'bar baz ter'),
-            ('no more',               4, True,  'foo ter'),
-            ('late',                  2, False, 'bar ter'),
-        )
-        
-        for state, perch_size, perch_smelly, tags in parrot_details:
-            perch = Perch.objects.create(size=perch_size, smelly=perch_smelly)
-            parrot = Parrot.objects.create(state=state, perch=perch)
-            Tag.objects.update_tags(parrot, tags)
-            
         self.l1 = Link.objects.create(name='link 1')
         Tag.objects.update_tags(self.l1, 'tag1 tag2 tag3 tag4 tag5')
         self.l2 = Link.objects.create(name='link 2')
@@ -964,10 +1131,10 @@ class TestGetRelatedTaggedItems(TestCase):
 class TestTagUsageForQuerySet(TestCase):
     def setUp(self):
         parrot_details = (
-            ('pining for the fjords', 9, True,  'foo bar'),
+            ('pining for the fjords', 9, True,  'foo bar spam:egg=ham'),
             ('passed on',             6, False, 'bar baz ter'),
-            ('no more',               4, True,  'foo ter'),
-            ('late',                  2, False, 'bar ter'),
+            ('no more',               4, True,  'foo ter spam:egg=ham'),
+            ('late',                  2, False, 'bar ter spam:foo'),
         )
         
         for state, perch_size, perch_smelly, tags in parrot_details:
@@ -977,99 +1144,125 @@ class TestTagUsageForQuerySet(TestCase):
     
     def test_tag_usage_for_queryset(self):
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(state='no more'), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 2)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 3)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(state__startswith='p'), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(perch__size__gt=4), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'baz', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(perch__smelly=True), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 4)
         self.failUnless((u'bar', 1) in relevant_attribute_list)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(perch__smelly=True), min_count=2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 1)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 2)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(perch__size__gt=4))
-        relevant_attribute_list = [(tag.name, hasattr(tag, 'counts')) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 4)
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'counts')) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', False) in relevant_attribute_list)
         self.failUnless((u'baz', False) in relevant_attribute_list)
         self.failUnless((u'foo', False) in relevant_attribute_list)
         self.failUnless((u'ter', False) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', False) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(perch__size__gt=99))
-        relevant_attribute_list = [(tag.name, hasattr(tag, 'counts')) for tag in tag_usage]
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'counts')) for tag in tag_usage]
         self.assertEquals(len(relevant_attribute_list), 0)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(Q(perch__size__gt=6) | Q(state__startswith='l')), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(Q(perch__size__gt=6) | Q(state__startswith='l')), min_count=2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
         self.assertEquals(len(relevant_attribute_list), 1)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.filter(Q(perch__size__gt=6) | Q(state__startswith='l')))
-        relevant_attribute_list = [(tag.name, hasattr(tag, 'counts')) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), hasattr(tag, 'counts')) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', False) in relevant_attribute_list)
         self.failUnless((u'foo', False) in relevant_attribute_list)
         self.failUnless((u'ter', False) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', False) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', False) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.exclude(state='passed on'), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 3)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 5)
         self.failUnless((u'bar', 2) in relevant_attribute_list)
         self.failUnless((u'foo', 2) in relevant_attribute_list)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 2) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.exclude(state__startswith='p'), min_count=2)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
         self.assertEquals(len(relevant_attribute_list), 1)
         self.failUnless((u'ter', 2) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.exclude(Q(perch__size__gt=6) | Q(perch__smelly=False)), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 2)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 3)
         self.failUnless((u'foo', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:egg=ham', 1) in relevant_attribute_list)
         
         tag_usage = Tag.objects.usage_for_queryset(Parrot.objects.exclude(perch__smelly=True).filter(state__startswith='l'), counts=True)
-        relevant_attribute_list = [(tag.name, tag.count) for tag in tag_usage]
-        self.assertEquals(len(relevant_attribute_list), 2)
+        relevant_attribute_list = [(unicode(tag), tag.count) for tag in tag_usage]
+        self.assertEquals(len(relevant_attribute_list), 3)
         self.failUnless((u'bar', 1) in relevant_attribute_list)
         self.failUnless((u'ter', 1) in relevant_attribute_list)
+        self.failUnless((u'spam:foo', 1) in relevant_attribute_list)
         
 ################
 # Model Fields #
 ################
 
 class TestTagFieldInForms(TestCase):
+    def setUp(self):
+        self.original_max_tag_length = settings.MAX_TAG_LENGTH
+        self.original_max_tag_name_length = settings.MAX_TAG_NAME_LENGTH
+        self.original_max_tag_namespace_length = settings.MAX_TAG_NAMESPACE_LENGTH
+        self.original_max_tag_value_length = settings.MAX_TAG_VALUE_LENGTH
+    
+    def tearDown(self):
+        settings.MAX_TAG_LENGTH = self.original_max_tag_length
+        settings.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
+        settings.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
+        settings.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
+
     def test_tag_field_in_modelform(self):
         # Ensure that automatically created forms use TagField
         class TestForm(forms.ModelForm):
@@ -1086,6 +1279,7 @@ class TestTagFieldInForms(TestCase):
         colon = Tag.objects.create(name='co:lon')
         equal = Tag.objects.create(name='equa=l')
         spaces_namespace = Tag.objects.create(name='foo', namespace='spa ces')
+        spaces_value = Tag.objects.create(name='foo', value='spa ces')
         spaces_colon_namespace = Tag.objects.create(name='foo', namespace='spa ces,colon')
         self.assertEquals(edit_string_for_tags([plain]), u'plain')
         self.assertEquals(edit_string_for_tags([plain, spaces]), u'plain, spa ces')
@@ -1096,20 +1290,56 @@ class TestTagFieldInForms(TestCase):
         self.assertEquals(edit_string_for_tags([equal, colon]), u'"equa=l" "co:lon"')
         self.assertEquals(edit_string_for_tags([equal, spaces, colon]), u'"equa=l", spa ces, "co:lon"')
         self.assertEquals(edit_string_for_tags([plain, spaces_namespace]), u'plain, spa ces:foo')
+        self.assertEquals(edit_string_for_tags([plain, spaces_value]), u'plain, foo=spa ces')
         self.assertEquals(edit_string_for_tags([plain, spaces_colon_namespace]), u'plain "spa ces,colon":foo')
     
     def test_tag_d_validation(self):
         t = TagField()
+        w50 = 'qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvb'
+        w51 = w50 + 'n'
+        w10 = w50[:10]
+        w11 = w50[:11]
+        settings.MAX_TAG_LENGTH = 150
+        settings.MAX_TAG_NAME_LENGTH = 50
+        settings.MAX_TAG_NAMESPACE_LENGTH = 50
+        settings.MAX_TAG_VALUE_LENGTH = 50
         self.assertEquals(t.clean('foo'), u'foo')
         self.assertEquals(t.clean('foo bar baz'), u'foo bar baz')
         self.assertEquals(t.clean('foo,bar,baz'), u'foo,bar,baz')
         self.assertEquals(t.clean('foo, bar, baz'), u'foo, bar, baz')
-        self.assertEquals(t.clean('foo qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvb bar'),
-            u'foo qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvb bar')
+        self.assertEquals(t.clean('foo %s bar' % w50),
+            u'foo %s bar' % w50)
+        self.assertEquals(t.clean('foo %s:%s=%s bar' % (w50, w50, w50)),
+            u'foo %s:%s=%s bar' % (w50, w50, w50))
         try:
-            t.clean('foo qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvbn bar')
+            t.clean('foo %s bar' % w51)
         except forms.ValidationError, ve:
-            self.assertEquals(unicode(list(ve.messages)), u"[u'Each tag may be no more than 50 characters long.']")
+            self.assertEquals(unicode(list(ve.messages)), u'[u"Each tag\'s name may be no more than 50 characters long."]')
+        except Exception, e:
+            raise e
+        else:
+            raise self.failureException('a ValidationError exception was supposed to have been raised.')
+        try:
+            t.clean('foo %s:%s bar' % (w51, w50))
+        except forms.ValidationError, ve:
+            self.assertEquals(unicode(list(ve.messages)), u'[u"Each tag\'s namespace may be no more than 50 characters long."]')
+        except Exception, e:
+            raise e
+        else:
+            raise self.failureException('a ValidationError exception was supposed to have been raised.')
+        try:
+            t.clean('foo %s=%s bar' % (w50, w51))
+        except forms.ValidationError, ve:
+            self.assertEquals(unicode(list(ve.messages)), u'[u"Each tag\'s value may be no more than 50 characters long."]')
+        except Exception, e:
+            raise e
+        else:
+            raise self.failureException('a ValidationError exception was supposed to have been raised.')
+        settings.MAX_TAG_LENGTH = 149
+        try:
+            t.clean('foo %s:%s=%s bar' % (w50, w50, w50))
+        except forms.ValidationError, ve:
+            self.assertEquals(unicode(list(ve.messages)), u"[u'Each tag may be no more than 149 characters long.']")
         except Exception, e:
             raise e
         else:
