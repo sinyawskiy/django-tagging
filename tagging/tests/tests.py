@@ -130,6 +130,25 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('":":":":"="="=":"="'), [u'":":"::="="=:="'])
         self.assertEquals(parse_tag_input('a-one "a-two" and "a-three'),
             [u'a-one', u'a-three', u'a-two', u'and'])
+    
+    def test_with_asterisks(self):
+        self.assertEquals(parse_tag_input('*:foo bar=*'), [u'*:foo', u'bar=*'])
+        self.assertEquals(parse_tag_input('*'), ['*'])
+        self.assertEquals(parse_tag_input('foo:*=bar'), [u'foo:*=bar'])
+        self.assertEquals(parse_tag_input(':*:='), [u'"*:"'])
+        self.assertEquals(parse_tag_input('"*":foo bar="*"'), [u'*:foo', u'bar=*'])
+        self.assertEquals(parse_tag_input('"*"'), ['*'])
+        self.assertEquals(parse_tag_input('foo:"*"=bar'), [u'foo:*=bar'])
+        self.assertEquals(parse_tag_input(':"*":='), [u'"*:"'])
+    
+    def test_keep_quotes(self):
+        self.assertEquals(parse_tag_input('*:foo bar=*', keep_quotes=['*']), [u'*:foo', u'bar=*'])
+        self.assertEquals(parse_tag_input('"*":foo bar=*', keep_quotes=['*']), [u'"*":foo', u'bar=*'])
+        self.assertEquals(parse_tag_input('"*":foo bar="*"', keep_quotes=['*']), [u'"*":foo', u'bar="*"'])
+        self.assertEquals(parse_tag_input('"*"', keep_quotes=['*']), ['"*"'])
+        self.assertEquals(parse_tag_input('*', keep_quotes=['*']), ['*'])
+        self.assertEquals(parse_tag_input('foo:*=bar', keep_quotes=['*']), [u'foo:*=bar'])
+        self.assertEquals(parse_tag_input('foo:"*"=bar', keep_quotes=['*']), [u'foo:"*"=bar'])
 
 class TestSplitStrip(TestCase):
     def test_with_empty_input(self):
@@ -154,6 +173,10 @@ class TestNormalisedTagListInput(TestCase):
         self.toast = Tag.objects.create(name='toast')
         self.food_cheese = Tag.objects.create(namespace='food', name='cheese')
         self.food_egg = Tag.objects.create(namespace='food', name='egg')
+        self.star_cheese_none = Tag.objects.create(namespace='*', name='cheese')
+        self.star_cheese_star = Tag.objects.create(namespace='*', name='cheese', value='*')
+        self.none_cheese_star = Tag.objects.create(name='cheese', value='*')
+        self.cheese_star_none = Tag.objects.create(namespace='cheese', name='*')
     
     def test_single_tag_object_as_input(self):
         self.assertEquals(get_tag_list(self.cheese), [self.cheese])
@@ -247,10 +270,13 @@ class TestNormalisedTagListInput(TestCase):
     
     def test_with_tag_filter(self):
         ret = get_tag_list(Tag.objects.filter(name__in=['cheese', 'toast']))
-        self.assertEquals(len(ret), 3)
+        self.assertEquals(len(ret), 6)
         self.failUnless(self.cheese in ret)
         self.failUnless(self.food_cheese in ret)
         self.failUnless(self.toast in ret)
+        self.failUnless(self.none_cheese_star in ret)
+        self.failUnless(self.star_cheese_star in ret)
+        self.failUnless(self.star_cheese_none in ret)
         
     def test_with_invalid_input_mix_of_string_and_instance(self):
         try:
@@ -274,6 +300,67 @@ class TestNormalisedTagListInput(TestCase):
                 (str(type(e)), str(e)))
         else:
             raise self.failureException('a ValueError exception was supposed to be raised!')
+
+    def test_with_asterisks(self):
+        ret = get_tag_list('*:cheese')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.star_cheese_none in ret)
+
+        ret = get_tag_list('cheese:*')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.cheese_star_none in ret)
+
+        ret = get_tag_list('*:cheese=*')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.star_cheese_star in ret)
+
+        ret = get_tag_list('cheese=*')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.none_cheese_star in ret)
+
+    def test_with_wildcards(self):
+        ret = get_tag_list('*:cheese', wildcard='*')
+        self.assertEquals(len(ret), 3)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+
+        ret = get_tag_list('cheese:*', wildcard='*')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.cheese_star_none in ret)
+
+        ret = get_tag_list('*:cheese=*', wildcard='*')
+        self.assertEquals(len(ret), 5)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.star_cheese_star in ret)
+        self.failUnless(self.none_cheese_star in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+
+        # you can quote the wildcard
+        ret = get_tag_list('"*":cheese="*"', wildcard='*')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.star_cheese_star in ret)
+
+        ret = get_tag_list('cheese=*', wildcard='*')
+        self.assertEquals(len(ret), 2)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.none_cheese_star in ret)
+
+        # you can use any string as wildcard
+        ret = get_tag_list('cheese=*', wildcard='cheese')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.none_cheese_star in ret)
+
+        ret = get_tag_list('*:*=*', wildcard='*')
+        self.assertEquals(len(ret), 8)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.star_cheese_star in ret)
+        self.failUnless(self.none_cheese_star in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.toast in ret)
+        self.failUnless(self.food_egg in ret)
 
     def test_with_tag_instance(self):
         self.assertEquals(get_tag(self.cheese), self.cheese)
@@ -374,6 +461,21 @@ class TestGetTagParts(TestCase):
             {'namespace': None, 'name': ':=', 'value': None})
         self.assertEquals(get_tag_parts('":=":":="=":="'),
             {'namespace': ':=', 'name': ':=', 'value': ':='})
+
+    def test_keep_quotes(self):
+        self.assertEquals(get_tag_parts('*', keep_quotes=['*']),
+            {'namespace': None, 'name': '*', 'value': None})
+        self.assertEquals(get_tag_parts('"*"', keep_quotes=['*']),
+            {'namespace': None, 'name': '"*"', 'value': None})
+        self.assertEquals(get_tag_parts('*:"*"=*', keep_quotes=['*']),
+            {'namespace': '*', 'name': '"*"', 'value': '*'})
+        self.assertEquals(get_tag_parts('"*":"*"="*"', keep_quotes=['*']),
+            {'namespace': '"*"', 'name': '"*"', 'value': '"*"'})
+        self.assertEquals(get_tag_parts('*:"*:"=*', keep_quotes=['*']),
+            {'namespace': '*', 'name': '*:', 'value': '*'})
+        self.assertEquals(get_tag_parts('*:"*:"=*', keep_quotes=['*']),
+            {'namespace': '*', 'name': '*:', 'value': '*'})
+
 
 class TestCheckTagLength(TestCase):
     def setUp(self):

@@ -24,7 +24,7 @@ RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
 
 RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
 
-def parse_tag_input(input):
+def parse_tag_input(input, keep_quotes=None):
     """
     Parses tag input, with multiple word input being activated and
     delineated by commas and double quotes. Quotes take precedence, so
@@ -35,13 +35,17 @@ def parse_tag_input(input):
     if not input:
         return []
 
+    if keep_quotes is None:
+        keep_quotes = ()
+
     input = force_unicode(input)
 
     # Special case - if there are no commas, colons or double quotes in the
     # input, we don't *do* a recall... I mean, we know we only need to
     # split on spaces.
     if u',' not in input and u'"' not in input and \
-        ':' not in input and '=' not in input:
+        ':' not in input and '=' not in input and \
+        not [part for part in keep_quotes if part in input]:
         words = list(set(split_strip(input, u' ')))
         words.sort()
         return words
@@ -72,28 +76,30 @@ def parse_tag_input(input):
     word = []
     for token, content in token_list:
         if token == delimiter:
-            word = build_tag(word)
+            word = build_tag(word, keep_quotes=keep_quotes)
             if word:
                 words.add(word)
             word = []
         else:
             word.append(content)
-    word = build_tag(word)
+    word = build_tag(word, keep_quotes=keep_quotes)
     if word:
         words.add(word)
     words = list(words)
     words.sort()
     return words
 
-def build_tag(tokens):
+def build_tag(tokens, keep_quotes=None):
     """
     Gets a list of strings and chars and builds a tag with correctly quoted
-    namespace, name and values. If there is no namespace or value the part will
-    be ignored.
+    namespace, name and values. If there is no namespace or value these parts
+    will be ignored.
     """
+    if keep_quotes is None:
+        keep_quotes = ()
     left, lms, middle, mrs, right = [], None, [], None, []
     if ':' not in tokens and '=' not in tokens:
-        return normalize_tag_part(''.join(tokens))
+        return normalize_tag_part(''.join(tokens), keep_quotes=keep_quotes)
     for token in tokens:
         if lms is None:
             if token == ':':
@@ -121,20 +127,24 @@ def build_tag(tokens):
             namespace, name, value = left, middle, right
         else:
             namespace, name, value = [], left, []
-    namespace = normalize_tag_part(''.join(namespace))
-    name = normalize_tag_part(''.join(name))
-    value = normalize_tag_part(''.join(value))
+    namespace = normalize_tag_part(''.join(namespace), keep_quotes=keep_quotes)
+    name = normalize_tag_part(''.join(name), keep_quotes=keep_quotes)
+    value = normalize_tag_part(''.join(value), keep_quotes=keep_quotes)
     if namespace:
         name = "%s:%s" % (namespace, name)
     if value:
         name = "%s=%s" % (name, value)
     return name
 
-def normalize_tag_part(input, stop_chars=':='):
+def normalize_tag_part(input, stop_chars=':=', keep_quotes=None):
     """
     Takes a namespace, name or value and removes trailing colons and equals.
     Adds quotes around each part that contains a colon or equals sign.
     """
+    if keep_quotes:
+        for part in keep_quotes:
+            if input == '"%s"' % part:
+                return input
     input = input.replace('"', '')
     if not input:
         return ''
@@ -207,7 +217,7 @@ def get_queryset_and_model(queryset_or_model):
     except AttributeError:
         return queryset_or_model._default_manager.all(), queryset_or_model
 
-def get_tag_list(tags):
+def get_tag_list(tags, wildcard=None):
     """
     Utility function for accepting tag input in a flexible manner.
 
@@ -233,7 +243,7 @@ def get_tag_list(tags):
     elif isinstance(tags, QuerySet) and tags.model is Tag:
         return tags
     elif isinstance(tags, types.StringTypes):
-        q = get_tag_filter_lookup(tags)
+        q = get_tag_filter_lookup(tags, wildcard=wildcard)
         if q is None:
             return []
         return Tag.objects.filter(q)
@@ -250,7 +260,9 @@ def get_tag_list(tags):
                 contents.add('int')
         if len(contents) == 1:
             if 'string' in contents:
-                q = get_tag_filter_lookup([force_unicode(tag) for tag in tags])
+                q = get_tag_filter_lookup(
+                    [force_unicode(tag) for tag in tags],
+                    wildcard=wildcard)
                 if q is None:
                     return []
                 return Tag.objects.filter(q)
@@ -263,26 +275,40 @@ def get_tag_list(tags):
     else:
         raise ValueError(_('The tag input given was invalid.'))
 
-def get_tag_filter_lookup(tags):
+def get_tag_filter_lookup(tags, wildcard=None):
     """
     Takes a user entered string or an iteratable of strings and returns a
     a ``Q`` object that matches all given tags.
 
     Returns ``None`` if no valid tag name is found in the strings.
     """
+    if wildcard == True:
+        use_wildcard = u'*'
+    if wildcard:
+        wildcard = force_unicode(wildcard)
+        keep_quotes = (wildcard,)
+    else:
+        keep_quotes = ()
     if isinstance(tags, types.StringTypes):
-        tags = parse_tag_input(tags)
+        tags = parse_tag_input(tags, keep_quotes=keep_quotes)
+    # a list of string where given
     else:
         tag_parsed = set()
         for tag in tags:
-            tag_parsed.update(parse_tag_input(tag))
+            tag_parsed.update(parse_tag_input(tag, keep_quotes=keep_quotes))
         tags = tag_parsed
-    tags = [get_tag_parts(tag) for tag in tags]
+    tags = [get_tag_parts(tag, keep_quotes=keep_quotes) for tag in tags]
     tag_names, tag_parts = [], []
     for tag in tags:
-        if not tag['namespace'] and not tag['value']:
+        if tag['namespace'] is None and tag['value'] is None:
             tag_names.append(tag['name'])
         else:
+            if wildcard:
+                for key, value in tag.items():
+                    if value == '"%s"' % wildcard:
+                        tag[key] = tag[key][1:-1]
+                    elif value == wildcard:
+                        del tag[key]
             tag_parts.append(tag)
     q = None
     if len(tag_names):
@@ -325,18 +351,22 @@ RE_TAG_PARTS = re.compile(
     r'(?:=(?P<value>"[^"]+"|[^"]+))?'
 )
 
-def get_tag_parts(tag):
+def get_tag_parts(tag, keep_quotes=None):
     """
     Utility function for accepting single tag string representation that are
-    returned from the ``parse_tag_input`` function.
+    returned from the ``parse_tag_input`` function. If the tag string was not
+    prepared by ``parse_tag_input`` this function may return unexpected results.
 
     It returns a dictionary with the keys ``namespace``, ``name`` and
     ``value``. The values have no quotes.
     """
+    if keep_quotes is None:
+        keep_quotes = ()
     parts = RE_TAG_PARTS.match(tag).groupdict()
     for key, value in parts.items():
         if value and value[0] == value[-1] == '"':
-            parts[key] = value[1:-1]
+            if value[1:-1] not in keep_quotes:
+                parts[key] = value[1:-1]
     return parts
 
 # Font size distribution algorithms
