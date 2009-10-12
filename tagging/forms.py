@@ -23,11 +23,11 @@ class TagAdminForm(forms.ModelForm):
 
     def clean(self):
         if settings.MAX_TAG_LENGTH:
-            total_length = sum(
-                len(self.cleaned_data['namespace']),
-                len(self.cleaned_data['name']),
-                len(self.cleaned_data['value']),
-            )
+            total_length = sum((
+                len(self.cleaned_data.get('namespace', '')),
+                len(self.cleaned_data.get('name', '')),
+                len(self.cleaned_data.get('value', '')),
+            ))
             if total_length > settings.MAX_TAG_LENGTH:
                 raise forms.ValidationError(
                     _('A tag may be no more than %s characters long.') %

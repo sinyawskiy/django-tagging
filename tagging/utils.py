@@ -286,7 +286,7 @@ def get_tag_filter_lookup(tags):
             tag_parts.append(tag)
     q = None
     if len(tag_names):
-        q = Q(name__in=tag_names)
+        q = Q(name__in=tag_names, namespace=None, value=None)
     for tag in tag_parts:
         if q is None:
             q = Q(**tag)
