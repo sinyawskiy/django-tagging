@@ -34,6 +34,10 @@ def parse_tag_input(input, default_namespace=None, keep_quotes=None):
     will get the default namespace. The default namespace is not applied to
     tags that have an empty namespace (like ``:name``).
 
+    If any part of a tag is contained in the iteratable ``keep_quotes`` it
+    will keep the quotes if any where passed to the function. This is
+    internally used to determine if a wildcard gets expanded or not.
+
     Returns a sorted list of unique tag names.
     """
     if not input:
@@ -430,8 +434,7 @@ def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
 
 def get_tag(tag, default_namespace=None):
     """
-    Utility function for accepting single tag input in a flexible
-    manner.
+    Utility function for accepting single tag input in a flexible manner.
 
     If a ``Tag`` object is given it will be returned as-is; if a
     string or integer are given, they will be used to lookup the
