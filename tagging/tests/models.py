@@ -43,3 +43,14 @@ class Article(models.Model):
 
 class FormTest(models.Model):
     tags = TagField('Test', help_text='Test')
+
+class DefaultNamespaceTest(models.Model):
+    categories = TagField('Categories', namespace='category')
+
+class DefaultNamespaceTest2(models.Model):
+    tags = TagField('Tags')
+    categories = TagField('Categories', namespace='category')
+
+class DefaultNamespaceTest3(models.Model):
+    foos = TagField('Foobars', namespace='foo')
+    categories = TagField('Categories', namespace='category')

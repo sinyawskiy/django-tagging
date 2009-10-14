@@ -1,21 +1,33 @@
 """
 A custom Model Field for tagging.
 """
-from django.db.models import signals
+from django.db.models import signals, Q
 from django.db.models.fields import CharField
 from django.utils.translation import ugettext_lazy as _
 
 from tagging import settings
 from tagging.models import Tag
-from tagging.utils import edit_string_for_tags
+from tagging.utils import edit_string_for_tags, get_tag_parts, parse_tag_input
+
+try:
+    set
+except NameError:
+    from sets import Set as set
 
 class TagField(CharField):
     """
     A "special" character field that actually works as a relationship to tags
     "under the hood". This exposes a space-separated string of tags, but does
     the splitting/reordering/etc. under the hood.
+
+    This field will only accept tags from a specific namespace if the
+    ``namespace`` parameter is given. Any athor tag that is assigned will be
+    thrown away.
     """
     def __init__(self, *args, **kwargs):
+        self.namespace = kwargs.get('namespace', None)
+        if 'namespace' in kwargs:
+            del kwargs['namespace']
         kwargs['max_length'] = kwargs.get('max_length', 255)
         kwargs['blank'] = kwargs.get('blank', True)
         super(TagField, self).__init__(*args, **kwargs)
@@ -48,36 +60,87 @@ class TagField(CharField):
            'tag1 tag2 tag3 tag4'
 
         """
+        self._init(owner or instance)
+        tags = self._get_instance_tag_cache(instance)
+
+        # if the instance cache is already filled: return it
+        if tags is not None:
+            return tags
+
+        kwargs = {}
+        # if there are more than one tag field on this model,
+        # skip the tags with namespaces of athor fields.
+        # Thats their domain.
+        if self.namespace is not None:
+            kwargs['limit_namespaces'] = (self.namespace,)
+        elif self._has_instance_multiple_tag_fields:
+            kwargs['skip_namespaces'] = self._foreign_namespaces
+
         # Handle access on the model (i.e. Link.tags)
         if instance is None:
-            return edit_string_for_tags(Tag.objects.usage_for_model(owner))
+            queryset = Tag.objects.usage_for_model(owner)
+        # Handle access on the model instance
+        else:
+            queryset = Tag.objects.get_for_object(instance)
+        tags = edit_string_for_tags(queryset,
+            default_namespace=self.namespace, **kwargs)
 
-        tags = self._get_instance_tag_cache(instance)
-        if tags is None:
-            if instance.pk is None:
-                self._set_instance_tag_cache(instance, '')
-            else:
-                self._set_instance_tag_cache(
-                    instance, edit_string_for_tags(Tag.objects.get_for_object(instance)))
-        return self._get_instance_tag_cache(instance)
+        if instance is not None:
+            self._set_instance_tag_cache(instance, tags)
+        return tags
 
     def __set__(self, instance, value):
         """
         Set an object's tags.
         """
         if instance is None:
-            raise AttributeError(_('%s can only be set on instances.') % self.name)
-        if settings.FORCE_LOWERCASE_TAGS and value is not None:
+            raise AttributeError(
+                _('%s can only be set on instances.') % self.name)
+        if value is None:
+            value = u''
+        if settings.FORCE_LOWERCASE_TAGS:
             value = value.lower()
         self._set_instance_tag_cache(instance, value)
+
+    def _init(self, instance):
+        """
+        Check if the model has more than one tag field and collects the default
+        namespaces of athor tag fields.
+        """
+        # check if already initialized
+        if  hasattr(self, '_has_instance_multiple_tag_fields') and \
+            hasattr(self, '_foreign_namespaces'):
+                return
+        # any athor tag fields of the model
+        tag_fields = []
+        for field in instance._meta.fields:
+            if isinstance(field, self.__class__) and field is not self:
+                tag_fields.append(field)
+        self._foreign_namespaces = set()
+        self._has_instance_multiple_tag_fields = False
+        if len(tag_fields):
+            self._has_instance_multiple_tag_fields = True
+            for field in tag_fields:
+                if  field.namespace is not None and\
+                    field.namespace != self.namespace:
+                    self._foreign_namespaces.add(field.namespace)
 
     def _save(self, **kwargs): #signal, sender, instance):
         """
         Save tags back to the database
         """
-        tags = self._get_instance_tag_cache(kwargs['instance'])
+        instance = kwargs['instance']
+        self._init(instance)
+        tags = self._get_instance_tag_cache(instance)
         if tags is not None:
-            Tag.objects.update_tags(kwargs['instance'], tags)
+            q = Q()
+            if self.namespace is not None:
+                q &= Q(namespace=self.namespace)
+            elif self._has_instance_multiple_tag_fields and \
+                    self._foreign_namespaces:
+                q &= ~Q(namespace__in=self._foreign_namespaces)
+            Tag.objects.update_tags(instance, tags, q=q,
+                default_namespace=self.namespace)
 
     def __delete__(self, instance):
         """
@@ -95,6 +158,25 @@ class TagField(CharField):
         """
         Helper: set an instance's tag cache.
         """
+        self._init(instance)
+        # If there is a tag field with a namespace, make sure that this field
+        # only gets the tags that are allowed.
+        if tags and (
+                self._has_instance_multiple_tag_fields or
+                self.namespace is not None
+            ):
+            tags = parse_tag_input(tags, default_namespace=self.namespace)
+            valid_tags = []
+            for tag_parts in tags:
+                tag_parts = get_tag_parts(tag_parts)
+                if  self.namespace is not None and \
+                    self.namespace == tag_parts['namespace']:
+                        del tag_parts['namespace']
+                        valid_tags.append(Tag(**tag_parts))
+                if  self.namespace is None and \
+                    tag_parts['namespace'] not in self._foreign_namespaces:
+                        valid_tags.append(Tag(**tag_parts))
+            tags = edit_string_for_tags(valid_tags)
         setattr(instance, '_%s_cache' % self.attname, tags)
 
     def get_internal_type(self):
@@ -102,6 +184,9 @@ class TagField(CharField):
 
     def formfield(self, **kwargs):
         from tagging import forms
-        defaults = {'form_class': forms.TagField}
+        defaults = {
+            'form_class': forms.TagField,
+            'default_namespace': self.namespace,
+        }
         defaults.update(kwargs)
         return super(TagField, self).formfield(**defaults)

@@ -24,11 +24,15 @@ RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
 
 RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
 
-def parse_tag_input(input, keep_quotes=None):
+def parse_tag_input(input, default_namespace=None, keep_quotes=None):
     """
     Parses tag input, with multiple word input being activated and
     delineated by commas and double quotes. Quotes take precedence, so
     they may contain commas.
+
+    If ``default_namespace`` is given, any tag that has no namespace specified
+    will get the default namespace. The default namespace is not applied to
+    tags that have an empty namespace (like ``:name``).
 
     Returns a sorted list of unique tag names.
     """
@@ -37,6 +41,10 @@ def parse_tag_input(input, keep_quotes=None):
 
     if keep_quotes is None:
         keep_quotes = ()
+    if default_namespace:
+        default_namespace = normalize_tag_part(
+            default_namespace,
+            keep_quotes=keep_quotes) or None
 
     input = force_unicode(input)
 
@@ -47,6 +55,8 @@ def parse_tag_input(input, keep_quotes=None):
         ':' not in input and '=' not in input and \
         not [part for part in keep_quotes if part in input]:
         words = list(set(split_strip(input, u' ')))
+        if default_namespace:
+            words = ['%s:%s' % (default_namespace, word) for word in words]
         words.sort()
         return words
 
@@ -76,30 +86,39 @@ def parse_tag_input(input, keep_quotes=None):
     word = []
     for token, content in token_list:
         if token == delimiter:
-            word = build_tag(word, keep_quotes=keep_quotes)
+            word = build_tag(word, default_namespace=default_namespace,
+                keep_quotes=keep_quotes)
             if word:
                 words.add(word)
             word = []
         else:
             word.append(content)
-    word = build_tag(word, keep_quotes=keep_quotes)
+    word = build_tag(word, default_namespace=default_namespace,
+        keep_quotes=keep_quotes)
     if word:
         words.add(word)
     words = list(words)
     words.sort()
     return words
 
-def build_tag(tokens, keep_quotes=None):
+def build_tag(tokens, default_namespace=None, keep_quotes=None):
     """
     Gets a list of strings and chars and builds a tag with correctly quoted
     namespace, name and values. If there is no namespace or value these parts
     will be ignored.
+
+    If no namespace was found and the ``default_namespace`` is given, the tag
+    gets the default namespace. The default namespace is not applied if an empty
+    namespace was found (like ``:name``).
     """
     if keep_quotes is None:
         keep_quotes = ()
     left, lms, middle, mrs, right = [], None, [], None, []
     if ':' not in tokens and '=' not in tokens:
-        return normalize_tag_part(''.join(tokens), keep_quotes=keep_quotes)
+        word = normalize_tag_part(''.join(tokens), keep_quotes=keep_quotes)
+        if word and default_namespace:
+            word = '%s:%s' % (default_namespace, word)
+        return word
     for token in tokens:
         if lms is None:
             if token == ':':
@@ -120,15 +139,23 @@ def build_tag(tokens, keep_quotes=None):
                 right.append(token)
         elif lms == '=':
             middle.append(token)
-    if lms == '=':
-        namespace, name, value = [], left, middle
+    if default_namespace:
+        empty_or_default_namespace = [default_namespace]
     else:
+        empty_or_default_namespace = []
+    if lms == '=':
+        namespace, name, value = empty_or_default_namespace, left, middle
+    else:
+        # lms == ':'
         if middle:
             namespace, name, value = left, middle, right
+        # not lms
         else:
-            namespace, name, value = [], left, []
-    namespace = normalize_tag_part(''.join(namespace), keep_quotes=keep_quotes)
+            namespace, name, value = empty_or_default_namespace, left, []
     name = normalize_tag_part(''.join(name), keep_quotes=keep_quotes)
+    if not name:
+        return ''
+    namespace = normalize_tag_part(''.join(namespace), keep_quotes=keep_quotes)
     value = normalize_tag_part(''.join(value), keep_quotes=keep_quotes)
     if namespace:
         name = "%s:%s" % (namespace, name)
@@ -164,12 +191,15 @@ def split_strip(input, delimiter=u','):
     words = [w.strip() for w in input.split(delimiter)]
     return [w for w in words if w]
 
-def edit_string_for_tags(tags):
+def edit_string_for_tags(tags, default_namespace=None,
+    limit_namespaces=None, skip_namespaces=None):
     """
     Given list of ``Tag`` instances, creates a string representation of
     the list suitable for editing by the user, such that submitting the
     given string representation back without changing it will give the
-    same list of tags.
+    same list of tags. Namespaces of tags that equals the ``default_namespace``
+    will be not be displayed. If ``default_namespace`` is given, all namespaces
+    that are ``None`` will be explicitly displayed (like ``:name``).
 
     Parts of tags which contain commas will be double quoted.
 
@@ -177,24 +207,47 @@ def edit_string_for_tags(tags):
     resulting string of tag names will be comma-delimited, otherwise
     it will be space-delimited.
     """
+    if limit_namespaces is None:
+        limit_namespaces = ()
+    if skip_namespaces is None:
+        skip_namespaces = ()
     quote_chars = ',:='
     fields = {'namespace': '', 'name': '', 'value': ''}
     names = []
     use_commas = False
     for tag in tags:
+        skip_tag = False
         for field in fields:
             fields[field] = getattr(tag, field) or ''
+            if field == 'namespace':
+                if  limit_namespaces and \
+                    fields['namespace'] not in limit_namespaces or \
+                    skip_namespaces and \
+                    fields['namespace'] in skip_namespaces:
+                    skip_tag = True
+                    break
             quoted = False
             for char in quote_chars:
                 if char in fields[field]:
                     fields[field] = '"%s"' % fields[field]
                     quoted = True
                     break
-            if not quoted and ' ' in fields[field]:
+            # Skip the comma test if namespace is default_namespace.
+            # The comma won't get printed.
+            if not (field == 'namespace' and
+                    default_namespace and
+                    fields['namespace'] == default_namespace) and \
+               not quoted and ' ' in fields[field]:
                 use_commas = True
+        if skip_tag:
+            continue
         name = fields['name']
-        if fields['namespace']:
-            name = '%s:%s' % (fields['namespace'], name)
+        if fields['namespace'] and fields['namespace'] != default_namespace:
+                name = '%s:%s' % (fields['namespace'], name)
+        elif not fields['namespace'] and default_namespace:
+                name = '%s:%s' % ('', name)
+        else:
+            pass # no namespace is added
         if fields['value']:
             name = '%s=%s' % (name, fields['value'])
         names.append(name)
@@ -217,7 +270,7 @@ def get_queryset_and_model(queryset_or_model):
     except AttributeError:
         return queryset_or_model._default_manager.all(), queryset_or_model
 
-def get_tag_list(tags, wildcard=None):
+def get_tag_list(tags, wildcard=None, default_namespace=None):
     """
     Utility function for accepting tag input in a flexible manner.
 
@@ -236,6 +289,25 @@ def get_tag_list(tags, wildcard=None):
        * A list or tuple of ``Tag`` objects.
        * A ``Tag`` ``QuerySet``.
 
+    You can specify a ``wildcard`` which is used to ignore a part of a
+    tag string in the query. The wildcard only works on whole parts.
+
+    Example::
+
+        >>> Tag.objects.create(name='foo')
+        >>> Tag.objects.create(namespace='food', name='spam')
+        >>> Tag.objects.create(namespace='food', name='egg')
+        >>> Tag.objects.create(namespace='food', name='egg', value='tasty')
+        >>> get_tag_list('food:*', wildcard='*')
+        [<Tag: food:egg>, <Tag: food:spam>]
+        >>> get_tag_list('food:*=*', wildcard='*')
+        [<Tag: food:egg>, <Tag: food:egg=tasty>, <Tag: food:spam>]
+        >>> get_tag_list('f*', wildcard='*')
+        []
+
+    The ``default_namespace`` is used for tag strings that have no
+    namespace specified. The default namespace is not applied to tags which
+    explicitly have an empty namespace (like ``:name``).
     """
     from tagging.models import Tag
     if isinstance(tags, Tag):
@@ -243,7 +315,8 @@ def get_tag_list(tags, wildcard=None):
     elif isinstance(tags, QuerySet) and tags.model is Tag:
         return tags
     elif isinstance(tags, types.StringTypes):
-        q = get_tag_filter_lookup(tags, wildcard=wildcard)
+        q = get_tag_filter_lookup(tags,
+            wildcard=wildcard, default_namespace=default_namespace)
         if q is None:
             return []
         return Tag.objects.filter(q)
@@ -262,7 +335,7 @@ def get_tag_list(tags, wildcard=None):
             if 'string' in contents:
                 q = get_tag_filter_lookup(
                     [force_unicode(tag) for tag in tags],
-                    wildcard=wildcard)
+                    wildcard=wildcard, default_namespace=default_namespace)
                 if q is None:
                     return []
                 return Tag.objects.filter(q)
@@ -275,12 +348,32 @@ def get_tag_list(tags, wildcard=None):
     else:
         raise ValueError(_('The tag input given was invalid.'))
 
-def get_tag_filter_lookup(tags, wildcard=None):
+def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
     """
     Takes a user entered string or an iteratable of strings and returns a
     a ``Q`` object that matches all given tags.
 
     Returns ``None`` if no valid tag name is found in the strings.
+
+    You can specify a ``wildcard`` which is used to ignore a part of a
+    tag string in the query. The wildcard only works on whole parts.
+
+    Example::
+
+        >>> Tag.objects.create(name='foo')
+        >>> Tag.objects.create(namespace='food', name='spam')
+        >>> Tag.objects.create(namespace='food', name='egg')
+        >>> Tag.objects.create(namespace='food', name='egg', value='tasty')
+        >>> get_tag_list('food:*', wildcard='*')
+        [<Tag: food:egg>, <Tag: food:spam>]
+        >>> get_tag_list('food:*=*', wildcard='*')
+        [<Tag: food:egg>, <Tag: food:egg=tasty>, <Tag: food:spam>]
+        >>> get_tag_list('f*', wildcard='*')
+        []
+
+    The ``default_namespace`` is used for tag strings that have no
+    namespace specified. The default namespace is not applied to tags which
+    explicitly have an empty namespace (like ``:name``).
     """
     if wildcard == True:
         use_wildcard = u'*'
@@ -290,12 +383,16 @@ def get_tag_filter_lookup(tags, wildcard=None):
     else:
         keep_quotes = ()
     if isinstance(tags, types.StringTypes):
-        tags = parse_tag_input(tags, keep_quotes=keep_quotes)
+        tags = parse_tag_input(tags,
+            keep_quotes=keep_quotes,
+            default_namespace=default_namespace)
     # a list of string where given
     else:
         tag_parsed = set()
         for tag in tags:
-            tag_parsed.update(parse_tag_input(tag, keep_quotes=keep_quotes))
+            tag_parsed.update(parse_tag_input(tag,
+                keep_quotes=keep_quotes,
+                default_namespace=default_namespace))
         tags = tag_parsed
     tags = [get_tag_parts(tag, keep_quotes=keep_quotes) for tag in tags]
     tag_names, tag_parts = [], []
@@ -320,7 +417,7 @@ def get_tag_filter_lookup(tags, wildcard=None):
             q = q | Q(**tag)
     return q
 
-def get_tag(tag):
+def get_tag(tag, default_namespace=None):
     """
     Utility function for accepting single tag input in a flexible
     manner.
@@ -330,6 +427,10 @@ def get_tag(tag):
     appropriate ``Tag``.
 
     If no matching tag can be found, ``None`` will be returned.
+
+    The ``default_namespace`` is used for tag strings that have no
+    namespace specified. The default namespace is not applied to tags which
+    explicitly have an empty namespace (like ``:name``).
     """
     from tagging.models import Tag
     if isinstance(tag, Tag):
@@ -337,7 +438,8 @@ def get_tag(tag):
 
     try:
         if isinstance(tag, types.StringTypes):
-            return Tag.objects.get(**get_tag_parts(tag))
+            return Tag.objects.get(**get_tag_parts(tag,
+                default_namespace=default_namespace))
         elif isinstance(tag, (types.IntType, types.LongType)):
             return Tag.objects.get(id=tag)
     except Tag.DoesNotExist:
@@ -346,27 +448,39 @@ def get_tag(tag):
     return None
 
 RE_TAG_PARTS = re.compile(
-    r'(?:(?P<namespace>"[^"]+"|[^:="]+):)?'
+    r'^(?P<namespace>(?:"[^"]+"|[^:="]+)?:)?'
     r'(?P<name>"[^"]+"|[^="]+)'
-    r'(?:=(?P<value>"[^"]+"|[^"]+))?'
+    r'(?P<value>=(?:"[^"]+"|[^"]+)?)?$'
 )
 
-def get_tag_parts(tag, keep_quotes=None):
+def get_tag_parts(tag, default_namespace=None, keep_quotes=None):
     """
     Utility function for accepting single tag string representation that are
-    returned from the ``parse_tag_input`` function. If the tag string was not
-    prepared by ``parse_tag_input`` this function may return unexpected results.
+    returned from the ``parse_tag_input`` function. This function may return
+    unexpected results if the tag string was not prepared by
+    ``parse_tag_input``.
+
+    If no namespace is found, the ``default_namespace`` will be applied.
 
     It returns a dictionary with the keys ``namespace``, ``name`` and
     ``value``. The values have no quotes.
     """
     if keep_quotes is None:
         keep_quotes = ()
+    default_namespace = default_namespace or None
     parts = RE_TAG_PARTS.match(tag).groupdict()
     for key, value in parts.items():
+        if key == 'namespace':
+            if value:
+                value = value[:-1] or None
+            elif value is None:
+                value = default_namespace
+        if key =='value' and value:
+            value = value[1:] or None
         if value and value[0] == value[-1] == '"':
             if value[1:-1] not in keep_quotes:
-                parts[key] = value[1:-1]
+                value = value[1:-1]
+        parts[key] = value
     return parts
 
 # Font size distribution algorithms

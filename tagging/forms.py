@@ -49,13 +49,19 @@ class TagAdminForm(forms.ModelForm):
 class TagField(forms.CharField):
     """
     A ``CharField`` which validates that its input is a valid list of
-    tag names.
+    tag names and checks the allowed length of the tag parts.
     """
+    def __init__(self, *args, **kwargs):
+        if 'default_namespace' in kwargs:
+            self.default_namespace = kwargs.pop('default_namespace')
+        else:
+            self.default_namespace = None
+        super(TagField, self).__init__(*args, **kwargs)
     def clean(self, value):
         value = super(TagField, self).clean(value)
         if value == u'':
             return value
-        for tag_name in parse_tag_input(value):
+        for tag_name in parse_tag_input(value, default_namespace=self.default_namespace):
             try:
                 check_tag_length(get_tag_parts(tag_name))
             except ValueError, e:

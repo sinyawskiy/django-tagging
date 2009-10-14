@@ -9,7 +9,7 @@ from tagging.forms import TagAdminForm, TagField
 from tagging import settings
 from tagging.generic import fetch_content_objects
 from tagging.models import Tag, TaggedItem
-from tagging.tests.models import Article, Link, Perch, Parrot, FormTest
+from tagging.tests.models import Article, Link, Perch, Parrot, FormTest, DefaultNamespaceTest, DefaultNamespaceTest2, DefaultNamespaceTest3
 from tagging.utils import calculate_cloud, check_tag_length, edit_string_for_tags, get_tag_list, get_tag_parts, get_tag, parse_tag_input, split_strip
 from tagging.utils import LINEAR
 
@@ -128,6 +128,7 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input(':,:,=,=,:,=,:,='), [])
         self.assertEquals(parse_tag_input(':= := =: =: : = = :'), [])
         self.assertEquals(parse_tag_input('":":":":"="="=":"="'), [u'":":"::="="=:="'])
+        self.assertEquals(parse_tag_input('foo: =bar'), [u'bar', u'foo'])
         self.assertEquals(parse_tag_input('a-one "a-two" and "a-three'),
             [u'a-one', u'a-three', u'a-two', u'and'])
     
@@ -149,6 +150,27 @@ class TestParseTagInput(TestCase):
         self.assertEquals(parse_tag_input('*', keep_quotes=['*']), ['*'])
         self.assertEquals(parse_tag_input('foo:*=bar', keep_quotes=['*']), [u'foo:*=bar'])
         self.assertEquals(parse_tag_input('foo:"*"=bar', keep_quotes=['*']), [u'foo:"*"=bar'])
+    
+    def test_default_namespace(self):
+        self.assertEquals(parse_tag_input('bar', default_namespace='foo'), [u'foo:bar'])
+        self.assertEquals(parse_tag_input('bar :bar', default_namespace='foo'), [u'bar', u'foo:bar'])
+        self.assertEquals(parse_tag_input('foo:bar bar', default_namespace='foo'), [u'foo:bar'])
+        self.assertEquals(parse_tag_input('bar=baz', default_namespace='foo'), [u'foo:bar=baz'])
+        self.assertEquals(parse_tag_input('bar=baz', default_namespace='col:on'), [u'"col:on":bar=baz'])
+        
+        self.assertEquals(parse_tag_input('bar', default_namespace='foo'), [u'foo:bar'])
+        self.assertEquals(parse_tag_input('bar foo', default_namespace='foo'), [u'foo:bar', u'foo:foo'])
+        self.assertEquals(parse_tag_input('bar=foo', default_namespace='foo'), [u'foo:bar=foo'])
+        self.assertEquals(parse_tag_input(':bar', default_namespace='foo'), [u'bar'], [u'foo:bar'])
+        self.assertEquals(parse_tag_input('"":bar', default_namespace='foo'), [u'bar'], [u'foo:bar'])
+        self.assertEquals(parse_tag_input('space:bar foo=value', default_namespace='foo'), [u'foo:foo=value', u'space:bar'])
+        self.assertEquals(parse_tag_input('foo: foo:foo', default_namespace='foo'), [u'foo:foo'])
+        self.assertEquals(parse_tag_input('space:"bar foo"=value', default_namespace='foo'), [u'space:bar foo=value'])
+        self.assertEquals(parse_tag_input('space:bar foo=value, baz ter', default_namespace='foo'), [u'foo:baz ter', u'space:bar foo=value'])
+        self.assertEquals(parse_tag_input('foo bar', default_namespace='col:on'), [u'"col:on":bar', u'"col:on":foo'])
+        self.assertEquals(parse_tag_input('foo bar', default_namespace='spa ce'), [u'spa ce:bar', u'spa ce:foo'])
+        self.assertEquals(parse_tag_input('foo bar', default_namespace='equ=al'), [u'"equ=al":bar', u'"equ=al":foo'])
+        self.assertEquals(parse_tag_input(' ', default_namespace='equ=al'), [])
 
 class TestSplitStrip(TestCase):
     def test_with_empty_input(self):
@@ -361,7 +383,42 @@ class TestNormalisedTagListInput(TestCase):
         self.failUnless(self.cheese in ret)
         self.failUnless(self.toast in ret)
         self.failUnless(self.food_egg in ret)
+    
+    def test_with_default_namespace(self):
+        ret = get_tag_list('cheese', default_namespace='food')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.food_cheese in ret)
+        
+        ret = get_tag_list(':cheese', default_namespace='food')
+        self.assertEquals(len(ret), 1)
+        self.failUnless(self.cheese in ret)
+        
+        ret = get_tag_list('cheese :cheese', default_namespace='food')
+        self.assertEquals(len(ret), 2)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.food_cheese in ret)
 
+    def test_with_wildcard_and_default_namespace(self):
+        ret = get_tag_list('*:cheese', wildcard='*', default_namespace='food')
+        self.assertEquals(len(ret), 3)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+    
+        ret = get_tag_list('*:cheese egg', wildcard='*', default_namespace='food')
+        self.assertEquals(len(ret), 4)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.food_egg in ret)
+    
+        ret = get_tag_list(['*:cheese', 'egg'], wildcard='*', default_namespace='food')
+        self.assertEquals(len(ret), 4)
+        self.failUnless(self.star_cheese_none in ret)
+        self.failUnless(self.food_cheese in ret)
+        self.failUnless(self.cheese in ret)
+        self.failUnless(self.food_egg in ret)
+    
     def test_with_tag_instance(self):
         self.assertEquals(get_tag(self.cheese), self.cheese)
         self.assertEquals(get_tag(self.cheese), self.cheese)
@@ -374,6 +431,11 @@ class TestNormalisedTagListInput(TestCase):
     
     def test_nonexistent_tag(self):
         self.assertEquals(get_tag('mouse'), None)
+
+    def test_get_tag_with_default_namespace(self):
+        self.assertEquals(get_tag('cheese', default_namespace='food'), self.food_cheese)
+        self.assertEquals(get_tag(':cheese', default_namespace='food'), self.cheese)
+        self.assertEquals(get_tag('*:cheese', default_namespace='food'), self.star_cheese_none)
 
 class TestCalculateCloud(TestCase):
     def setUp(self):
@@ -453,6 +515,10 @@ class TestGetTagParts(TestCase):
             {'namespace': 'foo', 'name': 'bar', 'value': 'baz'})
         self.assertEquals(get_tag_parts(' foo: bar =baz '),
             {'namespace': ' foo', 'name': ' bar ', 'value': 'baz '})
+        self.assertEquals(get_tag_parts(':foo'),
+            {'namespace': None, 'name': 'foo', 'value': None})
+        self.assertEquals(get_tag_parts('foo='),
+            {'namespace': None, 'name': 'foo', 'value': None})
 
     def test_with_quotes(self):
         self.assertEquals(get_tag_parts('"bar="'),
@@ -475,6 +541,16 @@ class TestGetTagParts(TestCase):
             {'namespace': '*', 'name': '*:', 'value': '*'})
         self.assertEquals(get_tag_parts('*:"*:"=*', keep_quotes=['*']),
             {'namespace': '*', 'name': '*:', 'value': '*'})
+
+    def test_default_namespace(self):
+        self.assertEquals(get_tag_parts('bar', default_namespace='foo'),
+            {'namespace': 'foo', 'name': 'bar', 'value': None})
+        self.assertEquals(get_tag_parts(':bar', default_namespace='foo'),
+            {'namespace': None, 'name': 'bar', 'value': None})
+        self.assertEquals(get_tag_parts('foo:bar', default_namespace='foo'),
+            {'namespace': 'foo', 'name': 'bar', 'value': None})
+        self.assertEquals(get_tag_parts('baz:bar', default_namespace='foo'),
+            {'namespace': 'baz', 'name': 'bar', 'value': None})
 
 
 class TestCheckTagLength(TestCase):
@@ -778,7 +854,80 @@ class TestBasicTagging(TestCase):
         tags = Tag.objects.get_for_object(self.dead_parrot)
         self.assertEquals(len(tags), 1)
         self.failUnless(get_tag('bar=baz') in tags)
-    
+
+    def test_update_tags_with_default_namespace(self):
+        Tag.objects.update_tags(self.dead_parrot, 'bar', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('foo:bar') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'bar foo', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('foo:foo') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'bar=foo', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('foo:bar=foo') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, ':bar', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('foo:bar') not in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, '"":bar', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('foo:bar') not in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'space:bar foo=value', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('space:bar') in tags)
+        self.failUnless(get_tag('foo:foo=value') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'foo: foo:foo', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('foo:foo') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'space:"bar foo"=value', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('space:bar foo=value') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'space:bar foo=value, baz ter', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('space:bar foo=value') in tags)
+        self.failUnless(get_tag('foo:baz ter') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'foo bar', default_namespace='col:on')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('"col:on":foo') in tags)
+        self.failUnless(get_tag('"col:on":bar') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'foo bar', default_namespace='spa ce')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('spa ce:foo') in tags)
+        self.failUnless(get_tag('spa ce:bar') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, 'foo bar', default_namespace='equ=al')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('"equ=al":foo') in tags)
+        self.failUnless(get_tag('"equ=al":bar') in tags)
+        
+        Tag.objects.update_tags(self.dead_parrot, ' ', default_namespace='equ=al')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 0)
+        
     def test_add_tag(self):
         # start off in a known, mildly interesting state
         Tag.objects.update_tags(self.dead_parrot, 'foo bar baz')
@@ -851,6 +1000,33 @@ class TestBasicTagging(TestCase):
         self.failUnless(get_tag('"foo:bar"') in tags)
         self.failUnless(get_tag('"foo":"bar"="baz"') in tags)
     
+    def test_add_tag_with_default_namespace(self):
+        Tag.objects.add_tag(self.dead_parrot, 'bar')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('bar') in tags)
+        
+        Tag.objects.add_tag(self.dead_parrot, 'bar', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        
+        Tag.objects.add_tag(self.dead_parrot, ':baz', default_namespace='foo')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 3)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        
+        Tag.objects.add_tag(self.dead_parrot, 'bar', default_namespace='col:on')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 4)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('foo:bar') in tags)
+        self.failUnless(get_tag('baz') in tags)
+        self.failUnless(get_tag('"col:on":bar') in tags)
+        
     def test_add_tag_invalid_input_no_tags_specified(self):
         # start off in a known, mildly interesting state
         Tag.objects.update_tags(self.dead_parrot, 'foo bar baz')
@@ -864,6 +1040,18 @@ class TestBasicTagging(TestCase):
         for input in invalid_input:
             try:
                 Tag.objects.add_tag(self.dead_parrot, input)
+            except AttributeError, ae:
+                self.assertEquals(str(ae), 'No tags were given: "%s".' % input)
+            except Exception, e:
+                raise self.failureException('the wrong type of exception was raised: type [%s] value [%s]' %\
+                    (str(type(e)), str(e)))
+            else:
+                raise self.failureException('an AttributeError exception was supposed to be raised!')
+        
+        invalid_input = ['     ', ':', '=', ':=']
+        for input in invalid_input:
+            try:
+                Tag.objects.add_tag(self.dead_parrot, input, default_namespace='foo')
             except AttributeError, ae:
                 self.assertEquals(str(ae), 'No tags were given: "%s".' % input)
             except Exception, e:
@@ -903,12 +1091,17 @@ class TestBasicTagging(TestCase):
         Tag.objects.update_tags(self.dead_parrot, u'ŠĐĆŽćžšđ')
         tags = Tag.objects.get_for_object(self.dead_parrot)
         self.assertEquals(len(tags), 1)
-        self.assertEquals(tags[0].name, u'ŠĐĆŽćžšđ')
+        self.assertEquals(unicode(tags[0]), u'ŠĐĆŽćžšđ')
         
         Tag.objects.update_tags(self.dead_parrot, u'你好')
         tags = Tag.objects.get_for_object(self.dead_parrot)
         self.assertEquals(len(tags), 1)
-        self.assertEquals(tags[0].name, u'你好')
+        self.assertEquals(unicode(tags[0]), u'你好')
+        
+        Tag.objects.update_tags(self.dead_parrot, u'ŠĐĆŽćžšđ', default_namespace=u'你好')
+        tags = Tag.objects.get_for_object(self.dead_parrot)
+        self.assertEquals(len(tags), 1)
+        self.assertEquals(unicode(tags[0]), u'你好:ŠĐĆŽćžšđ')
     
     def test_update_tags_with_none(self):
         # start off in a known, mildly interesting state
@@ -970,6 +1163,318 @@ class TestModelTagField(TestCase):
         f1.save()
         tags = Tag.objects.get_for_object(f1)
         self.assertEquals(len(tags), 0)
+
+    def test_single_tagfield_without_namespace(self):
+        f1 = FormTest.objects.create(
+            tags=u'tag1 foo:tag2 :tag3 ""tag""4=value')
+
+        tags = Tag.objects.get_for_object(f1)
+        tag1 = get_tag('tag1')
+        tag2 = get_tag('foo:tag2')
+        tag3 = get_tag('tag3')
+        tag4 = get_tag('tag4=value')
+        self.failUnless(None not in (tag1, tag2, tag3, tag4))
+        self.assertEquals(len(tags), 4)
+        self.failUnless(tag1 in tags)
+        self.failUnless(tag2 in tags)
+        self.failUnless(tag3 in tags)
+        self.failUnless(tag4 in tags)
+        
+        self.assertEquals(FormTest.tags, u'tag1 tag3 tag4=value foo:tag2')
+
+        # Returns the exact input string. Only works if there is one tagfield
+        # on the model which also must have not a namespace assigned.
+        self.assertEquals(f1.tags, u'tag1 foo:tag2 :tag3 ""tag""4=value')
+
+        f1.tags = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 0)
+        self.assertEquals(f1.tags, u'')
+
+        f1.tags = u'tag3 foo:tag2'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(tag2 in tags)
+        self.failUnless(tag3 in tags)
+
+        f1 = FormTest.objects.get(pk=f1.pk)
+
+        self.assertEquals(f1.tags, u'tag3 foo:tag2')
+        self.assertEquals(FormTest.tags, u'tag3 foo:tag2')
+
+    
+    def test_tagfield_with_namespace(self):
+        f1 = DefaultNamespaceTest.objects.create(
+            categories=u'cat1 :cat2 category:cat3 foo:cat4')
+        tags = Tag.objects.get_for_object(f1)
+        cat1 = get_tag('category:cat1')
+        cat2 = get_tag('cat2')
+        cat3 = get_tag('category:cat3')
+        cat4 = get_tag('foo:cat4')
+        self.failUnless(None not in (cat1, cat3))
+        self.failUnless(None is cat2)
+        self.failUnless(None is cat4)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(cat1 in tags)
+        self.failUnless(cat3 in tags)
+        
+        # not all tags of this model are shown
+        self.assertEquals(DefaultNamespaceTest.categories, u'cat1 cat3')
+
+        tag1 = Tag.objects.create(name='tag1')
+        Tag.objects.add_tag(f1, unicode(tag1))
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 3)
+        self.failUnless(cat1 in tags)
+        self.failUnless(cat3 in tags)
+        self.failUnless(tag1 in tags)
+        
+        # not all tags of this model are shown
+        self.assertEquals(DefaultNamespaceTest.categories, u'cat1 cat3')
+        
+        f1 = DefaultNamespaceTest.objects.get(pk=f1.pk)
+        
+        self.assertEquals(f1.categories, u'cat1 cat3')
+        
+        f1.categories = u'cat1'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(cat1 in tags)
+        self.failUnless(tag1 in tags)
+        
+        f1.categories = u':cat2'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(tag1 in tags)
+        
+        f1.categories = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(tag1 in tags)
+        
+        f2 = DefaultNamespaceTest.objects.create()
+        self.assertEquals(f2.categories, u'')
+        
+        f2.categories = 'cat5'
+        f2.save()
+        tags = Tag.objects.get_for_object(f2)
+        
+        cat5 = get_tag('category:cat5')
+        self.assertEquals(len(tags), 1)
+        self.failUnless(cat5 in tags)
+
+        f1 = DefaultNamespaceTest.objects.get(pk=f1.pk)
+        f2 = DefaultNamespaceTest.objects.get(pk=f2.pk)
+
+        self.assertEquals(f1.categories, u'')
+        self.assertEquals(f2.categories, u'cat5')
+        self.assertEquals(DefaultNamespaceTest.categories, u'cat5')
+    
+    def test_tagfield_and_tagfield_with_namespace(self):
+        f1 = DefaultNamespaceTest2.objects.create(
+            tags=u'tag1 :tag2 category:tag3 foo:tag4',
+            categories=u'cat1 :cat2 category:cat3 foo:cat4')
+        tags = Tag.objects.get_for_object(f1)
+        tag1 = get_tag('tag1')
+        tag2 = get_tag('tag2')
+        tag3 = get_tag('category:tag3')
+        tag4 = get_tag('foo:tag4')
+        cat1 = get_tag('category:cat1')
+        cat2 = get_tag('cat2')
+        cat3 = get_tag('category:cat3')
+        cat4 = get_tag('foo:cat4')
+        self.failUnless(None not in (tag1, tag2, tag4, cat1, cat3))
+        self.failUnless(tag3 is None)
+        self.failUnless(cat2 is None)
+        self.failUnless(cat4 is None)
+        self.assertEquals(len(tags), 5)
+        self.failUnless(tag1 in tags)
+        self.failUnless(tag2 in tags)
+        self.failUnless(tag4 in tags)
+        self.failUnless(cat1 in tags)
+        self.failUnless(cat3 in tags)
+        
+        self.assertEquals(DefaultNamespaceTest2.tags, u'tag1 tag2 foo:tag4')
+        self.assertEquals(DefaultNamespaceTest2.categories, u'cat1 cat3')
+        
+        f1 = DefaultNamespaceTest2.objects.get(pk=f1.pk)
+        
+        self.assertEquals(f1.tags, u'foo:tag4 tag1 tag2')
+        self.assertEquals(f1.categories, u'cat1 cat3')
+        
+        f1.tags = u'tag1'
+        f1.categories = u'cat1'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(tag1 in tags)
+        self.failUnless(cat1 in tags)
+        self.assertEquals(f1.tags, u'tag1')
+        self.assertEquals(f1.categories, u'cat1')
+        
+        f1.tags = u'category:cat1'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(cat1 in tags)
+        self.assertEquals(f1.tags, u'')
+        self.assertEquals(f1.categories, u'cat1')
+        
+        f1.tags = u'cat2'
+        f1.categories = u':cat2'
+        f1.save()
+        cat2 = get_tag('cat2')
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(cat2 in tags)
+        self.assertEquals(f1.tags, u'cat2')
+        self.assertEquals(f1.categories, u'')
+        
+        f1.tags = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 0)
+        self.assertEquals(f1.tags, u'')
+        self.assertEquals(f1.categories, u'')
+        
+        # Now its gone.
+        f1.tags = None
+        f1.categories = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 0)
+        self.assertEquals(f1.tags, u'')
+        self.assertEquals(f1.categories, u'')
+        
+        f2 = DefaultNamespaceTest2.objects.create()
+        self.assertEquals(f2.tags, u'')
+        self.assertEquals(f2.categories, u'')
+        
+        f2.tags = 'tag5'
+        f2.categories = 'cat5'
+        f2.save()
+        tags = Tag.objects.get_for_object(f2)
+        
+        tag5 = get_tag('tag5')
+        cat5 = get_tag('category:cat5')
+        self.assertEquals(len(tags), 2)
+        self.failUnless(tag5 in tags)
+        self.failUnless(cat5 in tags)
+
+        f1 = DefaultNamespaceTest2.objects.get(pk=f1.pk)
+        f2 = DefaultNamespaceTest2.objects.get(pk=f2.pk)
+
+        self.assertEquals(f1.tags, u'')
+        self.assertEquals(f1.categories, u'')
+        self.assertEquals(f2.tags, u'tag5')
+        self.assertEquals(f2.categories, u'cat5')
+        self.assertEquals(DefaultNamespaceTest2.tags, u'tag5')
+        self.assertEquals(DefaultNamespaceTest2.categories, u'cat5')
+    
+    def test_multiple_tagfields_with_namespace(self):
+        f1 = DefaultNamespaceTest3.objects.create(
+            foos=u'foo1 :foo2 category:foo3 foo:foo4',
+            categories=u'cat1 :cat2 category:cat3 foo:cat4')
+        tags = Tag.objects.get_for_object(f1)
+        foo1 = get_tag('foo:foo1')
+        foo2 = get_tag('foo2')
+        foo3 = get_tag('category:foo3')
+        foo4 = get_tag('foo:foo4')
+        cat1 = get_tag('category:cat1')
+        cat2 = get_tag('cat2')
+        cat3 = get_tag('category:cat3')
+        cat4 = get_tag('foo:cat4')
+        self.failUnless(None not in (foo1, foo4, cat1, cat3))
+        self.failUnless(foo2 is None)
+        self.failUnless(foo3 is None)
+        self.failUnless(cat2 is None)
+        self.failUnless(cat4 is None)
+        self.assertEquals(len(tags), 4)
+        self.failUnless(foo1 in tags)
+        self.failUnless(foo4 in tags)
+        self.failUnless(cat1 in tags)
+        self.failUnless(cat3 in tags)
+        
+        self.assertEquals(DefaultNamespaceTest3.foos, u'foo1 foo4')
+        self.assertEquals(DefaultNamespaceTest3.categories, u'cat1 cat3')
+        
+        f1 = DefaultNamespaceTest3.objects.get(pk=f1.pk)
+        
+        self.assertEquals(f1.foos, u'foo1 foo4')
+        self.assertEquals(f1.categories, u'cat1 cat3')
+        
+        f1.foos = u'foo1'
+        f1.categories = u'cat1'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(foo1 in tags)
+        self.failUnless(cat1 in tags)
+        self.assertEquals(f1.foos, u'foo1')
+        self.assertEquals(f1.categories, u'cat1')
+        
+        f1.foos = u'category:cat1'
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(cat1 in tags)
+        self.assertEquals(f1.foos, u'')
+        self.assertEquals(f1.categories, u'cat1')
+        
+        f1.foos = u'cat4'
+        f1.categories = u':cat2'
+        f1.save()
+        cat4 = get_tag('foo:cat4')
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 1)
+        self.failUnless(cat4 in tags)
+        self.assertEquals(f1.foos, u'cat4')
+        self.assertEquals(f1.categories, u'')
+        
+        f1.foos = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 0)
+        self.assertEquals(f1.foos, u'')
+        self.assertEquals(f1.categories, u'')
+        
+        f1.foos = None
+        f1.categories = None
+        f1.save()
+        tags = Tag.objects.get_for_object(f1)
+        self.assertEquals(len(tags), 0)
+        self.assertEquals(f1.foos, u'')
+        self.assertEquals(f1.categories, u'')
+        
+        f2 = DefaultNamespaceTest3.objects.create()
+        self.assertEquals(f2.foos, u'')
+        self.assertEquals(f2.categories, u'')
+        
+        f2.foos = 'foo5'
+        f2.categories = 'cat5'
+        f2.save()
+        tags = Tag.objects.get_for_object(f2)
+        
+        foo5 = get_tag('foo:foo5')
+        cat5 = get_tag('category:cat5')
+        self.assertEquals(len(tags), 2)
+        self.failUnless(foo5 in tags)
+        self.failUnless(cat5 in tags)
+
+        f1 = DefaultNamespaceTest3.objects.get(pk=f1.pk)
+        f2 = DefaultNamespaceTest3.objects.get(pk=f2.pk)
+
+        self.assertEquals(f1.foos, u'')
+        self.assertEquals(f1.categories, u'')
+        self.assertEquals(f2.foos, u'foo5')
+        self.assertEquals(f2.categories, u'cat5')
+        self.assertEquals(DefaultNamespaceTest3.foos, u'foo5')
+        self.assertEquals(DefaultNamespaceTest3.categories, u'cat5')
         
 class TestSettings(TestCase):
     def setUp(self):
@@ -1647,7 +2152,7 @@ class TestTagFieldInForms(TestCase):
         equal = Tag.objects.create(name='equa=l')
         spaces_namespace = Tag.objects.create(name='foo', namespace='spa ces')
         spaces_value = Tag.objects.create(name='foo', value='spa ces')
-        spaces_colon_namespace = Tag.objects.create(name='foo', namespace='spa ces,colon')
+        spaces_comma_namespace = Tag.objects.create(name='foo', namespace='spa ces,comma')
         self.assertEquals(edit_string_for_tags([plain]), u'plain')
         self.assertEquals(edit_string_for_tags([plain, spaces]), u'plain, spa ces')
         self.assertEquals(edit_string_for_tags([plain, spaces, comma]), u'plain, spa ces, "com,ma"')
@@ -1658,7 +2163,13 @@ class TestTagFieldInForms(TestCase):
         self.assertEquals(edit_string_for_tags([equal, spaces, colon]), u'"equa=l", spa ces, "co:lon"')
         self.assertEquals(edit_string_for_tags([plain, spaces_namespace]), u'plain, spa ces:foo')
         self.assertEquals(edit_string_for_tags([plain, spaces_value]), u'plain, foo=spa ces')
-        self.assertEquals(edit_string_for_tags([plain, spaces_colon_namespace]), u'plain "spa ces,colon":foo')
+        self.assertEquals(edit_string_for_tags([plain, spaces_comma_namespace]), u'plain "spa ces,comma":foo')
+        self.assertEquals(edit_string_for_tags([plain], default_namespace='spa ces'),
+            u':plain')
+        self.assertEquals(edit_string_for_tags([spaces_namespace], default_namespace='spa ces'),
+            u'foo')
+        self.assertEquals(edit_string_for_tags([spaces_namespace, plain, spaces_comma_namespace], default_namespace='spa ces'),
+            u'foo :plain "spa ces,comma":foo')
     
     def test_tag_d_validation(self):
         t = TagField()
@@ -1726,6 +2237,17 @@ class TestTagFieldInForms(TestCase):
         t = TagField(required=False)
         self.assertEquals(t.clean(''), '')
         self.assertEquals(t.clean(None), '')
+    
+    def test_tag_d_validation_with_default_namespace(self):
+        t = TagField(default_namespace='foo')
+        self.assertEquals(t.clean('bar'), 'bar')
+
+        settings.MAX_TAG_NAMESPACE_LENGTH = 10
+        t = TagField(default_namespace='qwertyuiop')
+        self.assertEquals(t.clean('bar'), 'bar')
+
+        t = TagField(default_namespace='qwertyuiopa')
+        self.assertRaises(forms.ValidationError, t.clean, 'bar')
 
 #########
 # Admin #
