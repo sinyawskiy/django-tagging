@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-import os
+import sys, os
 from django import forms
+from django.db import models
 from django.db.models import Q
 from django.test import TestCase
 from django.contrib.contenttypes.models import ContentType
@@ -816,6 +817,61 @@ class TestTagDescriptor(TestCase):
         tags = Tag.objects.get_for_object(self.pining_for_the_fjords_parrot)
         self.assertEquals(len(tags), 0)
 
+    def test_descriptors_with_namespace(self):
+        tags = Tag.objects.get_for_object(self.pining_for_the_fjords_parrot)
+        self.assertEquals(len(tags), 3)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('spam:egg=ham') in tags)
+
+        tags = self.pining_for_the_fjords_parrot.spam3
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('spam:egg=ham') in tags)
+
+        tags = self.pining_for_the_fjords_parrot.spam2
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('spam:egg=ham') in tags)
+
+        self.pining_for_the_fjords_parrot.spam = 'spam:egg'
+        tags = self.pining_for_the_fjords_parrot.spam
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('spam:egg') in tags)
+        tags = self.pining_for_the_fjords_parrot.spam2
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('spam:egg') in tags)
+
+        tags = Tag.objects.get_for_object(self.pining_for_the_fjords_parrot)
+        self.assertEquals(len(tags), 3)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('spam:egg') in tags)
+
+        del self.pining_for_the_fjords_parrot.spam
+
+        tags = self.pining_for_the_fjords_parrot.spam
+        self.assertEquals(len(tags), 0)
+        tags = self.pining_for_the_fjords_parrot.spam2
+        self.assertEquals(len(tags), 0)
+
+        tags = Tag.objects.get_for_object(self.pining_for_the_fjords_parrot)
+        self.assertEquals(len(tags), 2)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('bar') in tags)
+
+        tags = self.pining_for_the_fjords_parrot.attrs
+        self.assertEquals(len(tags), 0)
+
+        self.pining_for_the_fjords_parrot.attrs = 'fly size:big'
+        tags = self.pining_for_the_fjords_parrot.attrs
+        self.assertEquals(len(tags), 1)
+        self.failUnless(get_tag('attr:fly') in tags)
+
+        tags = Tag.objects.get_for_object(self.pining_for_the_fjords_parrot)
+        self.assertEquals(len(tags), 3)
+        self.failUnless(get_tag('foo') in tags)
+        self.failUnless(get_tag('bar') in tags)
+        self.failUnless(get_tag('attr:fly') in tags)
+
 ###########
 # Tagging #
 ###########
@@ -1119,6 +1175,12 @@ class TestBasicTagging(TestCase):
 class TestModelTagField(TestCase):
     """ Test the 'tags' field on models. """
     
+    def setUp(self):
+        self.original_stderr = sys.stderr
+    
+    def tearDown(self):
+        sys.stderr = self.original_stderr
+    
     def test_create_with_tags_specified(self):
         f1 = FormTest.objects.create(tags=u'test3 test2 test1 one:"two three"=four')
         tags = Tag.objects.get_for_object(f1)
@@ -1203,7 +1265,6 @@ class TestModelTagField(TestCase):
 
         self.assertEquals(f1.tags, u'tag3 foo:tag2')
         self.assertEquals(FormTest.tags, u'tag3 foo:tag2')
-
     
     def test_tagfield_with_namespace(self):
         f1 = DefaultNamespaceTest.objects.create(
@@ -1475,6 +1536,23 @@ class TestModelTagField(TestCase):
         self.assertEquals(f2.categories, u'cat5')
         self.assertEquals(DefaultNamespaceTest3.foos, u'foo5')
         self.assertEquals(DefaultNamespaceTest3.categories, u'cat5')
+
+    def test_model_tag_field_definition_validation(self):
+        from StringIO import StringIO
+        sys.stderr = StringIO()
+
+        from tagging.fields import TagField
+        try:
+            class Model(models.Model):
+                tags = TagField(namespace='foo')
+                foos = TagField(namespace='foo')
+        except SystemExit, e:
+            pass
+        else:
+            self.fail(
+                u'Validation of model fields failed. '
+                u'A namespace is only allowed once. '
+            )
         
 class TestSettings(TestCase):
     def setUp(self):

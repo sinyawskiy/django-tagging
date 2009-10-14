@@ -16,6 +16,9 @@ class Parrot(models.Model):
     tagged = ModelTagManager()
     tagged_items = ModelTaggedItemManager()
     tags = TagDescriptor()
+    spam = TagDescriptor(namespace='spam')
+    spam2 = TagDescriptor(namespace='spam')
+    attrs = TagDescriptor(namespace='attr')
 
     def __unicode__(self):
         return self.state

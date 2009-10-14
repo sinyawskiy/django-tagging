@@ -192,7 +192,7 @@ def split_strip(input, delimiter=u','):
     return [w for w in words if w]
 
 def edit_string_for_tags(tags, default_namespace=None,
-    limit_namespaces=None, skip_namespaces=None):
+    filter_namespaces=None, exclude_namespaces=None):
     """
     Given list of ``Tag`` instances, creates a string representation of
     the list suitable for editing by the user, such that submitting the
@@ -207,23 +207,34 @@ def edit_string_for_tags(tags, default_namespace=None,
     resulting string of tag names will be comma-delimited, otherwise
     it will be space-delimited.
     """
-    if limit_namespaces is None:
-        limit_namespaces = ()
-    if skip_namespaces is None:
-        skip_namespaces = ()
+    from tagging.models import Tag
+    if filter_namespaces is None:
+        filter_namespaces = ()
+    if exclude_namespaces is None:
+        exclude_namespaces = ()
+    if isinstance(tags, types.StringTypes):
+        tags = [get_tag_parts(tag)
+                for tag in parse_tag_input(tags,
+                    default_namespace=default_namespace)]
     quote_chars = ',:='
     fields = {'namespace': '', 'name': '', 'value': ''}
     names = []
     use_commas = False
     for tag in tags:
+        if isinstance(tag, Tag):
+            tag = {
+                'namespace': tag.namespace,
+                'name': tag.name,
+                'value': tag.value,
+            }
         skip_tag = False
         for field in fields:
-            fields[field] = getattr(tag, field) or ''
+            fields[field] = tag[field] or ''
             if field == 'namespace':
-                if  limit_namespaces and \
-                    fields['namespace'] not in limit_namespaces or \
-                    skip_namespaces and \
-                    fields['namespace'] in skip_namespaces:
+                if  filter_namespaces and \
+                    fields['namespace'] not in filter_namespaces or \
+                    exclude_namespaces and \
+                    fields['namespace'] in exclude_namespaces:
                     skip_tag = True
                     break
             quoted = False
@@ -550,3 +561,4 @@ def check_tag_length(tag_parts):
         raise ValueError("Tag's namespace part is too long.", 'namespace', settings.MAX_TAG_NAMESPACE_LENGTH)
     if value_len > settings.MAX_TAG_VALUE_LENGTH:
         raise ValueError("Tag's value part is too long.", 'value', settings.MAX_TAG_VALUE_LENGTH)
+

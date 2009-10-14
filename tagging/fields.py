@@ -67,14 +67,14 @@ class TagField(CharField):
         if tags is not None:
             return tags
 
-        kwargs = {}
+        kwargs = {'default_namespace': self.namespace}
         # if there are more than one tag field on this model,
         # skip the tags with namespaces of athor fields.
         # Thats their domain.
         if self.namespace is not None:
-            kwargs['limit_namespaces'] = (self.namespace,)
+            kwargs['filter_namespaces'] = (self.namespace,)
         elif self._has_instance_multiple_tag_fields:
-            kwargs['skip_namespaces'] = self._foreign_namespaces
+            kwargs['exclude_namespaces'] = self._foreign_namespaces
 
         # Handle access on the model (i.e. Link.tags)
         if instance is None:
@@ -82,8 +82,7 @@ class TagField(CharField):
         # Handle access on the model instance
         else:
             queryset = Tag.objects.get_for_object(instance)
-        tags = edit_string_for_tags(queryset,
-            default_namespace=self.namespace, **kwargs)
+        tags = edit_string_for_tags(queryset, **kwargs)
 
         if instance is not None:
             self._set_instance_tag_cache(instance, tags)
@@ -165,18 +164,12 @@ class TagField(CharField):
                 self._has_instance_multiple_tag_fields or
                 self.namespace is not None
             ):
-            tags = parse_tag_input(tags, default_namespace=self.namespace)
-            valid_tags = []
-            for tag_parts in tags:
-                tag_parts = get_tag_parts(tag_parts)
-                if  self.namespace is not None and \
-                    self.namespace == tag_parts['namespace']:
-                        del tag_parts['namespace']
-                        valid_tags.append(Tag(**tag_parts))
-                if  self.namespace is None and \
-                    tag_parts['namespace'] not in self._foreign_namespaces:
-                        valid_tags.append(Tag(**tag_parts))
-            tags = edit_string_for_tags(valid_tags)
+            kwargs = {'default_namespace': self.namespace}
+            if  self.namespace is None:
+                kwargs['exclude_namespaces'] = self._foreign_namespaces
+            else:
+                kwargs['filter_namespaces'] = (self.namespace,)
+            tags = edit_string_for_tags(tags, **kwargs)
         setattr(instance, '_%s_cache' % self.attname, tags)
 
     def get_internal_type(self):
@@ -190,3 +183,30 @@ class TagField(CharField):
         }
         defaults.update(kwargs)
         return super(TagField, self).formfield(**defaults)
+
+
+def validate_tag_fields(sender, **kwargs):
+    '''
+    Validates ``TagField``s on models.
+    '''
+    namespaces = set()
+    for field in sender._meta.fields:
+        if isinstance(field, TagField):
+            if field.namespace in namespaces:
+                import sys
+                from django.core.management.color import color_style
+                style = color_style()
+                e = (
+                    u"You specified more than one tag field with the "
+                    u"namespace '%s' on the model '%s.%s'. Please make "
+                    u"sure that there are only tag fields with different "
+                    u"namespaces on the same model." % (
+                        field.namespace,
+                        sender._meta.app_label,
+                        sender._meta.object_name)
+                )
+                sys.stderr.write(style.ERROR(str('Error: %s\n' % e)))
+                sys.exit(1)
+            namespaces.add(field.namespace)
+
+signals.class_prepared.connect(validate_tag_fields)
