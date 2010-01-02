@@ -475,7 +475,7 @@ class Tag(models.Model):
     """
     namespace = models.CharField(_('namespace'), max_length=50, null=True, blank=True, db_index=True)
     name      = models.CharField(_('name'), max_length=50, db_index=True)
-    value     = models.CharField(_('namespace'), max_length=50, null=True, blank=True, db_index=True)
+    value     = models.CharField(_('value'), max_length=50, null=True, blank=True, db_index=True)
 
     objects = TagManager()
 
