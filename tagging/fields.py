@@ -30,6 +30,7 @@ class TagField(CharField):
             del kwargs['namespace']
         kwargs['max_length'] = kwargs.get('max_length', 255)
         kwargs['blank'] = kwargs.get('blank', True)
+        kwargs['default'] = kwargs.get('default', '')
         super(TagField, self).__init__(*args, **kwargs)
 
     def contribute_to_class(self, cls, name):
@@ -40,6 +41,27 @@ class TagField(CharField):
 
         # Save tags back to the database post-save
         signals.post_save.connect(self._save, cls, True)
+
+        # Update tags from Tag objects post-init
+        signals.post_init.connect(self._update, cls, True)
+
+    def _get_edit_string_for_tags(self, owner=None, instance=None):
+        kwargs = {'default_namespace': self.namespace}
+        # if there are more than one tag field on this model,
+        # skip the tags with namespaces of athor fields.
+        # Thats their domain.
+        if self.namespace is not None:
+            kwargs['filter_namespaces'] = (self.namespace,)
+        elif self._has_instance_multiple_tag_fields:
+            kwargs['exclude_namespaces'] = self._foreign_namespaces
+
+        # Handle access on the model (i.e. Link.tags)
+        if instance is None:
+            queryset = Tag.objects.usage_for_model(owner)
+        # Handle access on the model instance
+        else:
+            queryset = Tag.objects.get_for_object(instance)
+        return edit_string_for_tags(queryset, **kwargs)
 
     def __get__(self, instance, owner=None):
         """
@@ -61,32 +83,9 @@ class TagField(CharField):
 
         """
         self._init(owner or instance)
-        tags = self._get_instance_tag_cache(instance)
-
-        # if the instance cache is already filled: return it
-        if tags is not None:
-            return tags
-
-        kwargs = {'default_namespace': self.namespace}
-        # if there are more than one tag field on this model,
-        # skip the tags with namespaces of athor fields.
-        # Thats their domain.
-        if self.namespace is not None:
-            kwargs['filter_namespaces'] = (self.namespace,)
-        elif self._has_instance_multiple_tag_fields:
-            kwargs['exclude_namespaces'] = self._foreign_namespaces
-
-        # Handle access on the model (i.e. Link.tags)
         if instance is None:
-            queryset = Tag.objects.usage_for_model(owner)
-        # Handle access on the model instance
-        else:
-            queryset = Tag.objects.get_for_object(instance)
-        tags = edit_string_for_tags(queryset, **kwargs)
-
-        if instance is not None:
-            self._set_instance_tag_cache(instance, tags)
-        return tags
+            return self._get_edit_string_for_tags(owner=owner)
+        return self._get_instance_tag_cache(instance)
 
     def __set__(self, instance, value):
         """
@@ -129,17 +128,23 @@ class TagField(CharField):
         Save tags back to the database
         """
         instance = kwargs['instance']
+        tags = self._get_instance_tag_cache(kwargs['instance'])
+        q = Q()
+        if self.namespace is not None:
+            q &= Q(namespace=self.namespace)
+        elif self._has_instance_multiple_tag_fields and \
+                self._foreign_namespaces:
+            q &= ~Q(namespace__in=self._foreign_namespaces)
+        Tag.objects.update_tags(instance, tags, q=q,
+            default_namespace=self.namespace)
+
+    def _update(self, **kwargs): #signal, sender, instance):
+        """
+        Update tag cache from TaggedItem objects.
+        """
+        instance = kwargs['instance']
         self._init(instance)
-        tags = self._get_instance_tag_cache(instance)
-        if tags is not None:
-            q = Q()
-            if self.namespace is not None:
-                q &= Q(namespace=self.namespace)
-            elif self._has_instance_multiple_tag_fields and \
-                    self._foreign_namespaces:
-                q &= ~Q(namespace__in=self._foreign_namespaces)
-            Tag.objects.update_tags(instance, tags, q=q,
-                default_namespace=self.namespace)
+        self._update_instance_tag_cache(instance)
 
     def __delete__(self, instance):
         """
@@ -171,6 +176,15 @@ class TagField(CharField):
                 kwargs['filter_namespaces'] = (self.namespace,)
             tags = edit_string_for_tags(tags, **kwargs)
         setattr(instance, '_%s_cache' % self.attname, tags)
+
+    def _update_instance_tag_cache(self, instance):
+        """
+        Helper: update an instance's tag cache from actual Tags.
+        """
+        # for an unsaved object, leave the default value alone
+        if instance.pk is not None:
+            tags = self._get_edit_string_for_tags(instance=instance)
+            self._set_instance_tag_cache(instance, tags)
 
     def get_internal_type(self):
         return 'CharField'

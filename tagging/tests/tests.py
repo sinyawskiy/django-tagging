@@ -10,7 +10,7 @@ from tagging.forms import TagAdminForm, TagField
 from tagging import settings
 from tagging.generic import fetch_content_objects
 from tagging.models import Tag, TaggedItem
-from tagging.tests.models import Article, Link, Perch, Parrot, FormTest, DefaultNamespaceTest, DefaultNamespaceTest2, DefaultNamespaceTest3
+from tagging.tests.models import Article, Link, Perch, Parrot, FormTest, FormTestNull, DefaultNamespaceTest, DefaultNamespaceTest2, DefaultNamespaceTest3
 from tagging.utils import calculate_cloud, check_tag_length, edit_string_for_tags, get_tag_list, get_tag_parts, get_tag, parse_tag_input, split_strip
 from tagging.utils import LINEAR
 
@@ -1549,7 +1549,26 @@ class TestModelTagField(TestCase):
                 u'Validation of model fields failed. '
                 u'A namespace is only allowed once. '
             )
-        
+    
+    def test_update_via_tags(self):
+        f1 = FormTest.objects.create(tags=u'one two three')
+        Tag.objects.get(name='three').delete()
+        t2 = Tag.objects.get(name='two')
+        t2.name = 'new'
+        t2.save()
+        f1again = FormTest.objects.get(pk=f1.pk)
+        self.failIf('three' in f1again.tags)
+        self.failIf('two' in f1again.tags)
+        self.failUnless('new' in f1again.tags)
+    
+    def test_creation_without_specifying_tags(self):
+        f1 = FormTest()
+        self.assertEquals(f1.tags, '')
+    
+    def test_creation_with_nullable_tags_field(self):
+        f1 = FormTestNull()
+        self.assertEquals(f1.tags, '')
+
 class TestSettings(TestCase):
     def setUp(self):
         self.original_force_lower_case_tags = settings.FORCE_LOWERCASE_TAGS
@@ -2260,6 +2279,7 @@ class TestTagFieldInForms(TestCase):
         self.assertEquals(t.clean('foo bar baz'), u'foo bar baz')
         self.assertEquals(t.clean('foo,bar,baz'), u'foo,bar,baz')
         self.assertEquals(t.clean('foo, bar, baz'), u'foo, bar, baz')
+
         self.assertEquals(t.clean('foo %s bar' % w50),
             u'foo %s bar' % w50)
         self.assertEquals(t.clean('foo %s:%s=%s bar' % (w50, w50, w50)),
