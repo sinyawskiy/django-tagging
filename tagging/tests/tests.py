@@ -824,10 +824,6 @@ class TestTagDescriptor(TestCase):
         self.failUnless(get_tag('bar') in tags)
         self.failUnless(get_tag('spam:egg=ham') in tags)
 
-        tags = self.pining_for_the_fjords_parrot.spam3
-        self.assertEquals(len(tags), 1)
-        self.failUnless(get_tag('spam:egg=ham') in tags)
-
         tags = self.pining_for_the_fjords_parrot.spam2
         self.assertEquals(len(tags), 1)
         self.failUnless(get_tag('spam:egg=ham') in tags)
