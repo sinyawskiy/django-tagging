@@ -4,7 +4,8 @@ Django Tagging
 
 A generic tagging application for `Django`_ projects, which allows
 association of a number of tags with any Django model instance and makes
-retrieval of tags simple.
+retrieval of tags simple. It is possible to group tags together in
+namespaces and use values to store additional information.
 
 .. _`Django`: http://www.djangoproject.com
 
@@ -61,7 +62,7 @@ opening a Python interpreter and entering the following commands::
 
    >>> import tagging
    >>> tagging.VERSION
-   (0, 3, 'pre')
+   (0, 4, 'pre')
 
 When you want to update your copy of the Django Tagging source code, run
 the command ``svn update`` from within the ``tagging-trunk`` directory.
@@ -120,6 +121,43 @@ Default: ``50``
 An integer which specifies the maximum length which any tag is allowed
 to have. This is used for validation in the ``django.contrib.admin``
 application and in any forms automatically generated using ``ModelForm``.
+The delimiters ':' for namespaces and '=' for values are not counted into
+the tag's length.
+
+**New in developement version**
+
+MAX_TAG_NAMESPACE_LENGTH
+--------------
+
+Default: ``50``
+
+An integer which specifies the maximum length which any namespace is allowed
+to have. This is used for validation in the ``django.contrib.admin``
+application and in any forms automatically generated using ``ModelForm``.
+The delimiter ':' is not counted into the namespace's length.
+
+**New in developement version**
+
+MAX_TAG_NAME_LENGTH
+--------------
+
+Default: ``50``
+
+An integer which specifies the maximum length which any tag name is allowed
+to have. This is used for validation in the ``django.contrib.admin``
+application and in any forms automatically generated using ``ModelForm``.
+
+**New in developement version**
+
+MAX_TAG_VALUE_LENGTH
+--------------
+
+Default: ``50``
+
+An integer which specifies the maximum length which any tag value is allowed
+to have. This is used for validation in the ``django.contrib.admin``
+application and in any forms automatically generated using ``ModelForm``.
+The delimiter '=' is not counted into the value's length.
 
 
 Registering your models
@@ -201,6 +239,24 @@ example::
    >>> widget.tags
    []
 
+**New in developement version**
+
+You can also use a ``TagDescriptor`` with a specific namespace. This is a
+simple way to handle many namespace seperated from each athor::
+
+   >>> Widget.hot = TagDescriptor(namespace='hot')
+   >>> Widget.cold = TagDescriptor(namespace='cold')
+   >>> widget.tags = 'toast, hot:melted cheese'
+   >>> widget.tags
+   [<Tag: toast>, <Tag: hot:melted cheese>]
+   >>> widget.hot
+   [<Tag: hot:melted cheese>]
+   >>> widget.cold = 'butter'
+   >>> widget.cold
+   [<Tag: cold:butter>]
+   >>> widget.tags
+   [<Tag: toast>, <Tag: cold:butter>, <Tag: hot:melted cheese>]
+
 ``ModelTagManager``
 -------------------
 
@@ -260,16 +316,15 @@ their tags.
 
   If ``num`` is given, a maximum of ``num`` instances will be returned.
 
-* ``with_all(tags, queryset=None)`` -- creates a ``QuerySet`` containing
-  model instances which are tagged with *all* the given tags. If a
-  ``queryset`` argument is provided, it will be used as the basis for
+* ``with_all(tags, queryset=None, **kwargs)`` -- creates a ``QuerySet``
+  containing model instances which are tagged with *all* the given tags.
+  If a ``queryset`` argument is provided, it will be used as the basis for
   the resulting ``QuerySet``.
 
-* ``with_any(tags, queryset=None)`` -- creates a ``QuerySet`` containing model
-  instances which are tagged with *any* the given tags. If a ``queryset``
-  argument is provided, it will be used as the basis for the resulting
-  ``QuerySet``.
-
+* ``with_any(tags, queryset=None, **kwargs)`` -- creates a ``QuerySet``
+  containing model instances which are tagged with *any* the given tags.
+  If a ``queryset`` argument is provided, it will be used as the basis for
+  the resulting ``QuerySet``.
 
 Tags
 ====
@@ -285,7 +340,13 @@ Fields
 
 ``Tag`` objects have the following fields:
 
-* ``name`` -- The name of the tag. This is a unique value.
+**New in developement version**
+
+* ``namespace`` -- The namespace of the tag. This can be null.
+* ``name`` -- The name of the tag.
+* ``value`` -- The value of the tag. This can be null.
+
+All fields together must be unique.
 
 Manager functions
 ~~~~~~~~~~~~~~~~~
@@ -293,8 +354,8 @@ Manager functions
 The ``Tag`` model has a custom manager which has the following helper
 methods:
 
-* ``update_tags(obj, tag_names)`` -- updates tags associated with an
-  object.
+* ``update_tags(obj, tag_names, default_namespace=None, q=None)``
+  -- updates tags associated with an object.
 
   ``tag_names`` is a string containing tag names with which ``obj``
   should be tagged.
@@ -302,10 +363,25 @@ methods:
   If ``tag_names`` is ``None`` or ``''``, the object's tags will be
   cleared.
 
-* ``add_tag(obj, tag_name)`` -- associates a tag with an an object.
+  ``default_namespace`` is a namespace that is assigned to all tags
+  in ``tag_names`` that have no namespace specified.
+  See `get_tag_list function`_ for more details.
+
+  ``q`` is a ``Q`` object that limits the selection of the tags before
+  they are checked if they must be removed. This is generally not used
+  by third party developers.
+
+* ``add_tag(obj, tag_name, default_namespace=None)``
+  -- associates a tag with an an object.
 
   ``tag_name`` is a string containing a tag name with which ``obj``
   should be tagged.
+
+**New in developement version**
+
+  ``default_namespace`` is a namespace that is assigned to the ``tag_name``
+  if it has no namespace specified.
+  See `get_tag_list function`_ for more details.
 
 * ``get_for_object(obj)`` -- returns a ``QuerySet`` containing all
   ``Tag`` objects associated with ``obj``.
@@ -328,11 +404,26 @@ methods:
   a subset of the model's instances, pass a dictionary of field lookups
   to be applied to ``model`` as the ``filters`` argument.
 
+.. _`usage_for_queryset method`:
+
+* ``usage_for_queryset(queryset, counts=False, min_count=None)``
+  -- returns a list of ``Tag`` objects associated with instances of
+  a model contained in the given ``queryset``.
+
+  If ``counts`` is ``True``, a ``count`` attribute will be added to each
+  tag, indicating how many times it has been associated with instances
+  of ``model``.
+
+  If ``min_count`` is given, only tags which have a ``count`` greater
+  than or equal to ``min_count`` will be returned. Passing a value for
+  ``min_count`` implies ``counts=True``.
+
 .. _`related_for_model method`:
 
-* ``related_for_model(tags, Model, counts=False, min_count=None)``
-  -- returns a list of tags related to a given list of tags - that is,
-  other tags used by items which have all the given tags.
+* ``related_for_model(tags, Model, counts=False, min_count=None,
+  wildcard=None, default_namespace=None)`` -- returns a list of tags related
+  to a given list of tags - that is, other tags used by items which have all
+  the given tags.
 
   If ``counts`` is ``True``, a ``count`` attribute will be added to each
   tag, indicating the number of items which have it in addition to the
@@ -341,6 +432,16 @@ methods:
   If ``min_count`` is given, only tags which have a ``count`` greater
   than or equal to ``min_count`` will be returned. Passing a value for
   ``min_count`` implies ``counts=True``.
+
+**New in developement version**
+
+  ``wildcard`` can be a string that is used to as a wildcard in ``tags``.
+  See `get_tag_list function`_ for more details.
+
+**New in developement version**
+
+  If ``default_namespace`` is given, it is applied to all ``tags`` that
+  have no namespace specified.  See `get_tag_list function`_ for more details.
 
 .. _`cloud_for_model method`:
 
@@ -409,6 +510,10 @@ Tags are created, associated and unassociated accordingly when you use
    >>> Tag.objects.add_tag(widget, 'tiles')
    >>> Tag.objects.get_for_object(widget)
    [<Tag: house>, <Tag: monkey>, <Tag: tiles>]
+   >>> Tag.objects.update_tags(widget,
+   ... 'banana apple', default_namespace='fruit')
+   >>> Tag.objects.get_for_object(widget)
+   [<Tag: fruit:banana>, <Tag: fruit:apple>]
 
 Clear an object's tags by passing ``None`` or ``''`` to
 ``update_tags``::
@@ -418,7 +523,7 @@ Clear an object's tags by passing ``None`` or ``''`` to
    []
 
 Retrieving tags used by a particular model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To retrieve all tags used for a particular model, use the
 ``get_for_model`` helper function::
@@ -480,19 +585,35 @@ Tag input from users is treated as follows:
     input, the remainder will be treated as comma-delimited. Otherwise,
     it will be treated as space-delimited.
 
+* The first ``'='`` character in an unquoted area of a tag is used to seperate
+  the tag's name from the value. Any ``'='`` character in the tag's value is
+  handled like any athor character.
+
+* The first ``':'`` character in an unquoted area of a tag is used to seperate
+  the namespace from the rest of the tag. Any athor ``':'`` character in the
+  tag is handled like any athor character.
+
 Examples:
 
-====================== ======================================= ================================================
+====================== ======================================= ==============================================
 Tag input string       Resulting tags                          Notes
-====================== ======================================= ================================================
+====================== ======================================= ==============================================
 apple ball cat         [``apple``], [``ball``], [``cat``]      No commas, so space delimited
 apple, ball cat        [``apple``], [``ball cat``]             Comma present, so comma delimited
 "apple, ball" cat dog  [``apple, ball``], [``cat``], [``dog``] All commas are quoted, so space delimited
 "apple, ball", cat dog [``apple, ball``], [``cat dog``]        Contains an unquoted comma, so comma delimited
 apple "ball cat" dog   [``apple``], [``ball cat``], [``dog``]  No commas, so space delimited
 "apple" "ball dog      [``apple``], [``ball``], [``dog``]      Unclosed double quote is ignored
-====================== ======================================= ================================================
+====================== ======================================= ==============================================
 
+=================== ========= =============== ======== ===================================
+Tag input string    Namespace Name            Value    Notes
+=================== ========= =============== ======== ===================================
+apple               ``None``  ``apple``       ``None`` No namespace and no value specified
+fruit:apple         ``fruit`` ``apple``       ``None`` The value defaults to ``None``
+fruit:"apple=tasty" ``fruit`` ``apple=tasty`` ``None`` No value because ``=`` is quoted
+cute:cat:pussy      ``cute``  ``cat:pussy``   ``None`` Only first ``:`` is recognized
+=================== ========= =============== ======== ===================================
 
 Tagged items
 ============
@@ -524,21 +645,51 @@ helper methods, which accept either a ``QuerySet`` or a ``Model``
 class as one of their arguments. To restrict the objects which are
 returned, pass in a filtered ``QuerySet`` for this argument:
 
-* ``get_by_model(queryset_or_model, tag)`` -- creates a ``QuerySet``
-  containing instances of the specififed model which are tagged with
-  the given tag or tags.
+* ``get_by_model(queryset_or_model, tags, wildcard=None,
+  default_namespace=None)`` -- creates a ``QuerySet`` containing instances
+  of the specififed model which are tagged with the given tag or tags.
 
-* ``get_intersection_by_model(queryset_or_model, tags)`` -- creates a
-  ``QuerySet`` containing instances of the specified model which are
-  tagged with every tag in a list of tags.
+**New in developement version**
+
+  ``wildcard`` can be a string that is used to as a wildcard in ``tags``.
+  See `get_tag_list function`_ for more details.
+
+**New in developement version**
+
+  If ``default_namespace`` is given, it is applied to all ``tags`` that
+  have no namespace specified.  See `get_tag_list function`_ for more details.
+
+* ``get_intersection_by_model(queryset_or_model, tags, wildcard=None,
+  default_namespace=None)`` -- creates a ``QuerySet`` containing instances
+  of the specified model which are tagged with every tag in a list of tags.
 
   ``get_by_model`` will call this function behind the scenes when you
   pass it a list, so you can use ``get_by_model`` instead of calling
   this method directly.
 
-* ``get_union_by_model(queryset_or_model, tags)`` -- creates a
-  ``QuerySet`` containing instances of the specified model which are
-  tagged with any tag in a list of tags.
+**New in developement version**
+
+  ``wildcard`` can be a string that is used to as a wildcard in ``tags``.
+  See `get_tag_list function`_ for more details.
+
+**New in developement version**
+
+  If ``default_namespace`` is given, it is applied to all ``tags`` that
+  have no namespace specified.  See `get_tag_list function`_ for more details.
+
+* ``get_union_by_model(queryset_or_model, tags, wildcard=None,
+  default_namespace=None)`` -- creates a ``QuerySet`` containing instances
+  of the specified model which are tagged with any tag in a list of tags.
+
+**New in developement version**
+
+  ``wildcard`` can be a string that is used to as a wildcard in ``tags``.
+  See `get_tag_list function`_ for more details.
+
+**New in developement version**
+
+  If ``default_namespace`` is given, it is applied to all ``tags`` that
+  have no namespace specified. See `get_tag_list function`_ for more details.
 
 .. _`get_related method`:
 
@@ -580,6 +731,26 @@ Functions which take tags are flexible when it comes to tag input::
    >>> TaggedItem.objects.get_by_model(Widget, ['house', 'thing'])
    [<Widget: pk=1>]
 
+Functions which take tags mostly also takes a ``wildcard`` parameter::
+
+   >>> TaggedItem.objects.get_by_model(Widget, 'fruit:*', wildcard='*')
+   [<Widget: pk=3>]
+   >>> TaggedItem.objects.get_by_model(Widget, 'fruit:*=*', wildcard='*')
+   [<Widget: pk=3>, <Widget: pk=4>]
+
+You can quote a wildcard to prevent it from expanding::
+   >>> TaggedItem.objects.get_by_model(Widget, 'fruit:"*"', wildcard='*')
+   []
+
+Functions which take tags mostly also takes a ``default_namespace`` parameter::
+
+   >>> TaggedItem.objects.get_by_model(Widget, 'apple', default_namespace='fruit')
+   [<Widget: pk=3>]
+   >>> TaggedItem.objects.get_by_model(Widget, 'apple=tasty', default_namespace='fruit')
+   [<Widget: pk=4>]
+
+See `get_tag_list function`_ for more details.
+
 Restricting objects returned
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -600,19 +771,30 @@ Utilities
 Tag-related utility functions are defined in the ``tagging.utils``
 module:
 
-``parse_tag_input(input)``
---------------------------
+.. _`parse_tag_input function`:
+
+``parse_tag_input(input, default_namespace=None, keep_quotes=None)``
+--------------------------------------------------------------------
 
 Parses tag input, with multiple word input being activated and
 delineated by commas and double quotes. Quotes take precedence, so they
 may contain commas.
 
+``default_namespace`` is a namespace that is applied to all tags that have
+no athor namespace defined. If ``default_namespace`` is set to ``fruit``
+and ``input`` is ``apple`` it would be parsed to ``fruit:apple``. But if input
+is ``:apple``, it would be parsed to ``apple`` because an empty namespace
+was specified explicitly.
+
 Returns a sorted list of unique tag names.
 
 See `tag input`_ for more details.
 
-``edit_string_for_tags(tags)``
-------------------------------
+.. _`edit_string_for_tags function`:
+
+``edit_string_for_tags(tags, default_namespace=None, filter_namespaces=None,
+exclude_namespaces=None)``
+----------------------------------------------------------------------------
 Given list of ``Tag`` instances, creates a string representation of the
 list suitable for editing by the user, such that submitting the given
 string representation back without changing it will give the same list
@@ -624,8 +806,19 @@ If any tag name which isn't being quoted contains whitespace, the
 resulting string of tag names will be comma-delimited, otherwise it will
 be space-delimited.
 
-``get_tag_list(tags)``
-----------------------
+``default_namespace`` is a namespace that is applied to all tags that have
+no athor namespace defined. If ``default_namespace`` is set to ``fruit``
+and ``input`` is ``apple`` it would be parsed to ``fruit:apple``. But if input
+is ``:apple``, it would be parsed to ``apple`` because an empty namespace
+was specified explicitly.
+
+If the namespace of a given tag is in ``exclude_namespaces`` or not in
+``filter_namespaces``, it will be removed from the resulting string.
+
+.. _`get_tag_list function`:
+
+``get_tag_list(tags, wildcard=None, default_namespace=None)``
+-------------------------------------------------------------
 
 Utility function for accepting tag input in a flexible manner.
 
@@ -643,6 +836,45 @@ If given, the following will be returned as-is:
 
    * A list or tuple of ``Tag`` objects.
    * A ``Tag`` ``QuerySet``.
+
+The parameters ``wildcard`` and ``default_namespace`` are only used if a
+string is given.
+
+``wildcard`` can be any string and will be is used to expand namespaces,
+tag names and values. But this is only possible with whole namespaces, names
+and values and cannot be used to expand parts of them. One wildcard is also
+only used for one part of the tag, this means you cannot match the name and
+the value of a tag with one wildcard.
+
+If a ``wildcard`` is specified but you want to match the exact string
+representation of ``wildcard`` you can double-quote the wildcard.
+
+Examples::
+
+    >>> get_tag_list('fruit:*', wildcard='*')
+    [<Tag fruit:apple>, <Tag fruit:banana>, <Tag: fruit:pineapple>]
+    >>> get_tag_list('fruit:*=*', wildcard='*')
+    [<Tag fruit:apple>, <Tag fruit:apple=tasty>, <Tag fruit:banana>, <Tag fruit:banana=*>, <Tag: fruit:pineapple>]
+    >>> get_tag_list('*:apple=*', wildcard='*')
+    [<Tag fruit:apple>, <Tag fruit:apple=tasty>, <Tag: food:apple>, <Tag: apple=green>]
+    >>> get_tag_list('fruit:*="*"', wildcard='*')
+    [<Tag fruit:banana=*>]
+    >>> get_tag_list('fruit:*apple')
+    []
+
+You can define a namespace with ``default_namespace`` that is applied to all
+tags which have no namespace explicitly specified.
+
+Examples::
+
+    >>> get_tag_list('apple', default_namespace='fruit')
+    [<Tag fruit:apple>]
+    >>> get_tag_list('food:apple', default_namespace='fruit')
+    [<Tag food:apple>]
+    >>> get_tag_list(':apple=green', default_namespace='fruit')
+    [<Tag apple=green>]
+    >>> get_tag_list('apple food:apple :apple=green', default_namespace='fruit')
+    [<Tag apple=green>, <Tag fruit:apple>, <Tag food:apple>]
 
 ``calculate_cloud(tags, steps=4, distribution=tagging.utils.LOGARITHMIC)``
 --------------------------------------------------------------------------
@@ -700,6 +932,36 @@ This field will also validate that it has been given a valid list of
 tag names, separated by a single comma, a single space or a comma
 followed by a space.
 
+You can assign more than one ``TagField`` to a model if you want to. But you
+need to specify on every field a different namespace::
+
+    class Food(models.Model):
+       ...
+       tags = TagField()
+       taste = TagField(namespace='taste')
+
+Now you can specify tags on both fields. But tags that have a different
+namespace than the field they are assigned to will simply be ignored. The
+same happens to tags which have a namespace that is present on anathor
+``TagField``. Even if the ``TagField`` where the tag is assigned to has
+no specific namespace.
+
+Example::
+
+    >>> f = Food.object.get(...)
+    >>> f.taste = 'sweet bitter'
+    >>> f.tags
+    u''
+    >>> f.taste
+    u'bitter sweet'
+    >>> f.tags = 'size:big green taste:sour'
+    >>> Tag.objects.get_for_object(f)
+    [<Tag: green>, <Tag: taste:bitter>, <Tag: taste:sweet>, <Tag: size:big>]
+    >>> f.taste = 'size:small'
+    >>> f.tags
+    u'green size:big'
+    >>> f.taste
+    u''
 
 Form fields
 ===========
