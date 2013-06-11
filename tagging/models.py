@@ -10,11 +10,10 @@ except NameError:
 from django.contrib.contenttypes import generic
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection, models
-from django.db.models.query import QuerySet
 from django.utils.translation import ugettext_lazy as _
 
 from tagging import settings
-from tagging.utils import calculate_cloud, get_tag_list, get_queryset_and_model, parse_tag_input
+from tagging.utils import calculate_cloud, get_tag_list, get_tag_parts, get_queryset_and_model, normalize_tag_part, parse_tag_input
 from tagging.utils import LOGARITHMIC
 
 qn = connection.ops.quote_name
@@ -24,36 +23,46 @@ qn = connection.ops.quote_name
 ############
 
 class TagManager(models.Manager):
-    def update_tags(self, obj, tag_names):
+    def update_tags(self, obj, tag_names, default_namespace=None, q=None):
         """
         Update tags associated with an object.
+
+        Accepts a ``default_namespace`` parameter that is assigned to tags
+        with no namespace specified.
         """
         ctype = ContentType.objects.get_for_model(obj)
-        current_tags = list(self.filter(items__content_type__pk=ctype.pk,
-                                        items__object_id=obj.pk))
-        updated_tag_names = parse_tag_input(tag_names)
+        current_tags = self.filter(items__content_type__pk=ctype.pk,
+            items__object_id=obj.pk)
+        if q is not None:
+            current_tags = current_tags.filter(q)
+        current_tags = list(current_tags)
+        updated_tag_names = parse_tag_input(tag_names,
+            default_namespace=default_namespace)
         if settings.FORCE_LOWERCASE_TAGS:
             updated_tag_names = [t.lower() for t in updated_tag_names]
 
         # Remove tags which no longer apply
         tags_for_removal = [tag for tag in current_tags \
-                            if tag.name not in updated_tag_names]
+                            if unicode(tag) not in updated_tag_names]
         if len(tags_for_removal):
             TaggedItem._default_manager.filter(content_type__pk=ctype.pk,
-                                               object_id=obj.pk,
-                                               tag__in=tags_for_removal).delete()
+                object_id=obj.pk, tag__in=tags_for_removal).delete()
         # Add new tags
-        current_tag_names = [tag.name for tag in current_tags]
+        current_tag_names = [unicode(tag) for tag in current_tags]
         for tag_name in updated_tag_names:
             if tag_name not in current_tag_names:
-                tag, created = self.get_or_create(name=tag_name)
+                tag, created = self.get_or_create(**get_tag_parts(tag_name))
                 TaggedItem._default_manager.create(tag=tag, object=obj)
 
-    def add_tag(self, obj, tag_name):
+    def add_tag(self, obj, tag_name, default_namespace=None):
         """
         Associates the given object with a tag.
+
+        Accepts a ``default_namespace`` parameter that is assigned to a tag
+        with no namespace specified.
         """
-        tag_names = parse_tag_input(tag_name)
+        tag_names = parse_tag_input(tag_name,
+            default_namespace=default_namespace)
         if not len(tag_names):
             raise AttributeError(_('No tags were given: "%s".') % tag_name)
         if len(tag_names) > 1:
@@ -61,7 +70,7 @@ class TagManager(models.Manager):
         tag_name = tag_names[0]
         if settings.FORCE_LOWERCASE_TAGS:
             tag_name = tag_name.lower()
-        tag, created = self.get_or_create(name=tag_name)
+        tag, created = self.get_or_create(**get_tag_parts(tag_name))
         ctype = ContentType.objects.get_for_model(obj)
         TaggedItem._default_manager.get_or_create(
             tag=tag, content_type=ctype, object_id=obj.pk)
@@ -85,7 +94,7 @@ class TagManager(models.Manager):
         model_table = qn(model._meta.db_table)
         model_pk = '%s.%s' % (model_table, qn(model._meta.pk.column))
         query = """
-        SELECT DISTINCT %(tag)s.id, %(tag)s.name%(count_sql)s
+        SELECT DISTINCT %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value%(count_sql)s
         FROM
             %(tag)s
             INNER JOIN %(tagged_item)s
@@ -95,9 +104,9 @@ class TagManager(models.Manager):
             %%s
         WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
             %%s
-        GROUP BY %(tag)s.id, %(tag)s.name
+        GROUP BY %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value
         %%s
-        ORDER BY %(tag)s.name ASC""" % {
+        ORDER BY %(tag)s.namespace, %(tag)s.name, %(tag)s.value ASC""" % {
             'tag': qn(self.model._meta.db_table),
             'count_sql': counts and (', COUNT(%s)' % model_pk) or '',
             'tagged_item': qn(TaggedItem._meta.db_table),
@@ -115,9 +124,9 @@ class TagManager(models.Manager):
         cursor.execute(query % (extra_joins, extra_criteria, min_count_sql), params)
         tags = []
         for row in cursor.fetchall():
-            t = self.model(*row[:2])
+            t = self.model(*row[:4])
             if counts:
-                t.count = row[2]
+                t.count = row[4]
             tags.append(t)
         return tags
 
@@ -180,7 +189,8 @@ class TagManager(models.Manager):
             extra_criteria = ''
         return self._get_usage(queryset.model, counts, min_count, extra_joins, extra_criteria, params)
 
-    def related_for_model(self, tags, model, counts=False, min_count=None):
+    def related_for_model(self, tags, model, counts=False, min_count=None,
+                          wildcard=None, default_namespace=None):
         """
         Obtain a list of tags related to a given list of tags - that
         is, other tags used by items which have all the given tags.
@@ -194,11 +204,12 @@ class TagManager(models.Manager):
         Passing a value for ``min_count`` implies ``counts=True``.
         """
         if min_count is not None: counts = True
-        tags = get_tag_list(tags)
+        tags = get_tag_list(tags,
+            wildcard=wildcard, default_namespace=default_namespace)
         tag_count = len(tags)
         tagged_item_table = qn(TaggedItem._meta.db_table)
         query = """
-        SELECT %(tag)s.id, %(tag)s.name%(count_sql)s
+        SELECT %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value%(count_sql)s
         FROM %(tagged_item)s INNER JOIN %(tag)s ON %(tagged_item)s.tag_id = %(tag)s.id
         WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
           AND %(tagged_item)s.object_id IN
@@ -212,7 +223,7 @@ class TagManager(models.Manager):
               HAVING COUNT(%(tagged_item)s.object_id) = %(tag_count)s
           )
           AND %(tag)s.id NOT IN (%(tag_id_placeholders)s)
-        GROUP BY %(tag)s.id, %(tag)s.name
+        GROUP BY %(tag)s.id, %(tag)s.namespace, %(tag)s.name, %(tag)s.value
         %(min_count_sql)s
         ORDER BY %(tag)s.name ASC""" % {
             'tag': qn(self.model._meta.db_table),
@@ -232,9 +243,9 @@ class TagManager(models.Manager):
         cursor.execute(query, params)
         related = []
         for row in cursor.fetchall():
-            tag = self.model(*row[:2])
+            tag = self.model(*row[:4])
             if counts is True:
-                tag.count = row[2]
+                tag.count = row[4]
             related.append(tag)
         return related
 
@@ -280,12 +291,17 @@ class TaggedItemManager(models.Manager):
           Now that the queryset-refactor branch is in the trunk, this can be
           tidied up significantly.
     """
-    def get_by_model(self, queryset_or_model, tags):
+    def get_by_model(self, queryset_or_model, tags,
+                     wildcard=None, default_namespace=None):
         """
         Create a ``QuerySet`` containing instances of the specified
         model associated with a given tag or list of tags.
+
+        The ``wildcard`` and the ``default_namespace`` parameters are
+        allowed. For more details see the ``get_tag_list`` function.
         """
-        tags = get_tag_list(tags)
+        tags = get_tag_list(tags,
+            wildcard=wildcard, default_namespace=default_namespace)
         tag_count = len(tags)
         if tag_count == 0:
             # No existing tags were given
@@ -314,12 +330,17 @@ class TaggedItemManager(models.Manager):
             params=[content_type.pk, tag.pk],
         )
 
-    def get_intersection_by_model(self, queryset_or_model, tags):
+    def get_intersection_by_model(self, queryset_or_model, tags,
+                                  wildcard=None, default_namespace=None):
         """
         Create a ``QuerySet`` containing instances of the specified
         model associated with *all* of the given list of tags.
+
+        The ``wildcard`` and the ``default_namespace`` parameters are
+        allowed. For more details see the ``get_tag_list`` function.
         """
-        tags = get_tag_list(tags)
+        tags = get_tag_list(tags,
+            wildcard=wildcard, default_namespace=default_namespace)
         tag_count = len(tags)
         queryset, model = get_queryset_and_model(queryset_or_model)
 
@@ -353,12 +374,17 @@ class TaggedItemManager(models.Manager):
         else:
             return model._default_manager.none()
 
-    def get_union_by_model(self, queryset_or_model, tags):
+    def get_union_by_model(self, queryset_or_model, tags,
+                           wildcard=None, default_namespace=None):
         """
         Create a ``QuerySet`` containing instances of the specified
         model associated with *any* of the given list of tags.
+
+        The ``wildcard`` and the ``default_namespace`` parameters are
+        allowed. For more details see the ``get_tag_list`` function.
         """
-        tags = get_tag_list(tags)
+        tags = get_tag_list(tags,
+            wildcard=wildcard, default_namespace=default_namespace)
         tag_count = len(tags)
         queryset, model = get_queryset_and_model(queryset_or_model)
 
@@ -457,17 +483,25 @@ class Tag(models.Model):
     """
     A tag.
     """
-    name = models.CharField(_('name'), max_length=50, unique=True, db_index=True)
+    namespace = models.CharField(_('namespace'), max_length=50, null=True, blank=True, db_index=True)
+    name      = models.CharField(_('name'), max_length=50, db_index=True)
+    value     = models.CharField(_('value'), max_length=50, null=True, blank=True, db_index=True)
 
     objects = TagManager()
 
     class Meta:
-        ordering = ('name',)
+        unique_together = (('namespace', 'name', 'value'),)
+        ordering = ('namespace', 'name', 'value')
         verbose_name = _('tag')
         verbose_name_plural = _('tags')
 
     def __unicode__(self):
-        return self.name
+        name = normalize_tag_part(self.name)
+        if self.namespace:
+            name = '%s:%s' % (normalize_tag_part(self.namespace), name)
+        if self.value:
+            name = '%s=%s' % (name, normalize_tag_part(self.value))
+        return name
 
 class TaggedItem(models.Model):
     """
