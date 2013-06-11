@@ -25,9 +25,7 @@ class TagField(CharField):
     thrown away.
     """
     def __init__(self, *args, **kwargs):
-        self.namespace = kwargs.get('namespace', None)
-        if 'namespace' in kwargs:
-            del kwargs['namespace']
+        self.namespace = kwargs.pop('namespace', None)
         kwargs['max_length'] = kwargs.get('max_length', 255)
         kwargs['blank'] = kwargs.get('blank', True)
         kwargs['default'] = kwargs.get('default', '')
@@ -197,6 +195,13 @@ class TagField(CharField):
         }
         defaults.update(kwargs)
         return super(TagField, self).formfield(**defaults)
+
+    def south_field_triple(self):
+        "Returns a suitable description of this field for South."
+        from south.modelsinspector import introspector
+        field_class = "django.db.models.fields.TextField"
+        args, kwargs = introspector(self)
+        return (field_class, args, kwargs)
 
 
 def validate_tag_fields(sender, **kwargs):
