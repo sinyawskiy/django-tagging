@@ -4,12 +4,12 @@ Based entirely on Django's own ``setup.py``.
 """
 from setuptools import setup, find_packages
 
-import tagging
+from tagging.version import __version__
 
 
 setup(
     name = 'django-tagging',
-    version = tagging.get_version(),
+    version = __version__,
     description = 'Generic tagging application for Django',
     author = 'Jonathan Buchanan',
     author_email = 'jonathan.buchanan@gmail.com',

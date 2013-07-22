@@ -1,3 +1,6 @@
+#coding: utf-8
+from __future__ import unicode_literals, absolute_import
+
 """
 Tagging utilities - from user tag input parsing to tag cloud
 calculation.
@@ -11,18 +14,13 @@ from django.db.models.query import QuerySet
 from django.utils.encoding import force_unicode
 from django.utils.translation import ugettext as _
 
-# Python 2.3 compatibility
-try:
-    set
-except NameError:
-    from sets import Set as set
-
 RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'[:=]|"[^"]*"|[^,\s:="]+')
 RE_SPACE_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s+")
 RE_COMMA_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s*,\s*")
 RE_CHAR_TOKEN = re.compile(r"^(%s)(.*)$" % r"[:=]|[^,\s:=]+")
 
 RE_STRING_TOKEN = re.compile(r'^(%s)(.*)$' % r'"[^"]*"')
+
 
 def parse_tag_input(input, default_namespace=None, keep_quotes=None):
     """
@@ -105,6 +103,7 @@ def parse_tag_input(input, default_namespace=None, keep_quotes=None):
     words.sort()
     return words
 
+
 def build_tag(tokens, default_namespace=None, keep_quotes=None):
     """
     Gets a list of strings and chars and builds a tag with correctly quoted
@@ -167,6 +166,7 @@ def build_tag(tokens, default_namespace=None, keep_quotes=None):
         name = "%s=%s" % (name, value)
     return name
 
+
 def normalize_tag_part(input, stop_chars=':=', keep_quotes=None):
     """
     Takes a namespace, name or value and removes trailing colons and equals.
@@ -184,6 +184,7 @@ def normalize_tag_part(input, stop_chars=':=', keep_quotes=None):
             return '"%s"' % input
     return input
 
+
 def split_strip(input, delimiter=u','):
     """
     Splits ``input`` on ``delimiter``, stripping each resulting string
@@ -194,6 +195,7 @@ def split_strip(input, delimiter=u','):
 
     words = [w.strip() for w in input.split(delimiter)]
     return [w for w in words if w]
+
 
 def edit_string_for_tags(tags, default_namespace=None,
     filter_namespaces=None, exclude_namespaces=None):
@@ -272,6 +274,7 @@ def edit_string_for_tags(tags, default_namespace=None,
         glue = u' '
     return glue.join(names)
 
+
 def get_queryset_and_model(queryset_or_model):
     """
     Given a ``QuerySet`` or a ``Model``, returns a two-tuple of
@@ -284,6 +287,7 @@ def get_queryset_and_model(queryset_or_model):
         return queryset_or_model, queryset_or_model.model
     except AttributeError:
         return queryset_or_model._default_manager.all(), queryset_or_model
+
 
 def get_tag_list(tags, wildcard=None, default_namespace=None):
     """
@@ -363,6 +367,7 @@ def get_tag_list(tags, wildcard=None, default_namespace=None):
     else:
         raise ValueError(_('The tag input given was invalid.'))
 
+
 def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
     """
     Takes a user entered string or an iteratable of strings and returns a
@@ -432,6 +437,7 @@ def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
             q = q | Q(**tag)
     return q
 
+
 def get_tag(tag, default_namespace=None):
     """
     Utility function for accepting single tag input in a flexible manner.
@@ -461,11 +467,13 @@ def get_tag(tag, default_namespace=None):
 
     return None
 
+
 RE_TAG_PARTS = re.compile(
     r'^(?P<namespace>(?:"[^"]+"|[^:="]+)?:)?'
     r'(?P<name>"[^"]+"|[^="]+)'
     r'(?P<value>=(?:"[^"]+"|[^"]+)?)?$'
 )
+
 
 def get_tag_parts(tag, default_namespace=None, keep_quotes=None):
     """
@@ -500,9 +508,11 @@ def get_tag_parts(tag, default_namespace=None, keep_quotes=None):
 # Font size distribution algorithms
 LOGARITHMIC, LINEAR = 1, 2
 
+
 def _calculate_thresholds(min_weight, max_weight, steps):
     delta = (max_weight - min_weight) / float(steps)
     return [min_weight + i * delta for i in range(1, steps + 1)]
+
 
 def _calculate_tag_weight(weight, max_weight, distribution):
     """
@@ -516,6 +526,7 @@ def _calculate_tag_weight(weight, max_weight, distribution):
     elif distribution == LOGARITHMIC:
         return math.log(weight) * max_weight / math.log(max_weight)
     raise ValueError(_('Invalid distribution algorithm specified: %s.') % distribution)
+
 
 def calculate_cloud(tags, steps=4, distribution=LOGARITHMIC):
     """
@@ -544,6 +555,7 @@ def calculate_cloud(tags, steps=4, distribution=LOGARITHMIC):
                     font_set = True
     return tags
 
+
 def check_tag_length(tag_parts):
     """
     Checks the length of the tag parts according to the settings. The lengths
@@ -551,17 +563,17 @@ def check_tag_length(tag_parts):
     The delimiters for namespace and value (':' and '=') are not counted. They
     are not part of the tag.
     """
-    from tagging import settings
+    from tagging import conf
     namespace_len = len(tag_parts['namespace'] or '')
     name_len = len(tag_parts['name'] or '')
     value_len = len(tag_parts['value'] or '')
     tag_len = name_len + namespace_len + value_len
-    if tag_len > settings.MAX_TAG_LENGTH:
-        raise ValueError("Tag is too long.", 'tag', settings.MAX_TAG_LENGTH)
-    if name_len > settings.MAX_TAG_NAME_LENGTH:
-        raise ValueError("Tag's name part is too long.", 'name', settings.MAX_TAG_NAME_LENGTH)
-    if namespace_len > settings.MAX_TAG_NAMESPACE_LENGTH:
-        raise ValueError("Tag's namespace part is too long.", 'namespace', settings.MAX_TAG_NAMESPACE_LENGTH)
-    if value_len > settings.MAX_TAG_VALUE_LENGTH:
-        raise ValueError("Tag's value part is too long.", 'value', settings.MAX_TAG_VALUE_LENGTH)
+    if tag_len > conf.MAX_TAG_LENGTH:
+        raise ValueError("Tag is too long.", 'tag', conf.MAX_TAG_LENGTH)
+    if name_len > conf.MAX_TAG_NAME_LENGTH:
+        raise ValueError("Tag's name part is too long.", 'name', conf.MAX_TAG_NAME_LENGTH)
+    if namespace_len > conf.MAX_TAG_NAMESPACE_LENGTH:
+        raise ValueError("Tag's namespace part is too long.", 'namespace', conf.MAX_TAG_NAMESPACE_LENGTH)
+    if value_len > conf.MAX_TAG_VALUE_LENGTH:
+        raise ValueError("Tag's value part is too long.", 'value', conf.MAX_TAG_VALUE_LENGTH)
 

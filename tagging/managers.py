@@ -1,3 +1,5 @@
+#coding: utf-8
+from __future__ import unicode_literals, absolute_import
 """
 Custom managers for Django models registered with the tagging
 application.
@@ -7,6 +9,7 @@ from django.db import models
 
 from tagging.models import Tag, TaggedItem
 from tagging.utils import edit_string_for_tags
+
 
 class ModelTagManager(models.Manager):
     """
@@ -25,6 +28,7 @@ class ModelTagManager(models.Manager):
 
     def usage(self, *args, **kwargs):
         return Tag.objects.usage_for_model(self.model, *args, **kwargs)
+
 
 class ModelTaggedItemManager(models.Manager):
     """
@@ -49,6 +53,7 @@ class ModelTaggedItemManager(models.Manager):
         else:
             return TaggedItem.objects.get_union_by_model(
                 queryset, tags, **kwargs)
+
 
 class TagDescriptor(object):
     """

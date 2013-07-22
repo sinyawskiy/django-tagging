@@ -1,18 +1,22 @@
-"""
-A custom Model Field for tagging.
-"""
+#coding: utf-8
+from __future__ import unicode_literals, absolute_import
+
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import signals, Q
 from django.db.models.fields import CharField
+
+from django.utils.importlib import import_module
 from django.utils.translation import ugettext_lazy as _
 
-from tagging import settings
+from tagging import conf, forms
 from tagging.models import Tag
-from tagging.utils import edit_string_for_tags, get_tag_parts, parse_tag_input
+from tagging.utils import edit_string_for_tags
 
-try:
-    set
-except NameError:
-    from sets import Set as set
+WIDGET_MODULE = import_module(conf.WIDGET)
+if not hasattr(WIDGET_MODULE, 'TagWidget'):
+    raise ImproperlyConfigured('Wrong widget module `{}`'.format(conf.WIDGET))
+
 
 class TagField(CharField):
     """
@@ -24,8 +28,10 @@ class TagField(CharField):
     ``namespace`` parameter is given. Any athor tag that is assigned will be
     thrown away.
     """
+
     def __init__(self, *args, **kwargs):
         self.namespace = kwargs.pop('namespace', None)
+        self.max_tags = kwargs.pop('max_tags', None)
         kwargs['max_length'] = kwargs.get('max_length', 255)
         kwargs['blank'] = kwargs.get('blank', True)
         kwargs['default'] = kwargs.get('default', '')
@@ -94,7 +100,7 @@ class TagField(CharField):
                 _('%s can only be set on instances.') % self.name)
         if value is None:
             value = u''
-        if settings.FORCE_LOWERCASE_TAGS:
+        if conf.FORCE_LOWERCASE_TAGS:
             value = value.lower()
         self._set_instance_tag_cache(instance, value)
 
@@ -188,12 +194,19 @@ class TagField(CharField):
         return 'CharField'
 
     def formfield(self, **kwargs):
-        from tagging import forms
+        widget_kwargs = {
+            'max_tags': self.max_tags,
+            'namespace': self.namespace
+        }
+
         defaults = {
             'form_class': forms.TagField,
             'default_namespace': self.namespace,
         }
         defaults.update(kwargs)
+
+        defaults['widget'] = WIDGET_MODULE.TagWidget(**widget_kwargs)
+
         return super(TagField, self).formfield(**defaults)
 
     def south_field_triple(self):

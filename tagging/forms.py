@@ -1,10 +1,12 @@
+#coding: utf-8
+from __future__ import unicode_literals, absolute_import
 """
 Tagging components for Django's form library.
 """
 from django import forms
 from django.utils.translation import ugettext as _
 
-from tagging import settings
+from tagging import conf
 from tagging.models import Tag
 from tagging.utils import check_tag_length, get_tag_parts, parse_tag_input
 
@@ -22,29 +24,30 @@ class TagAdminForm(forms.ModelForm):
         return value
 
     def clean(self):
-        if settings.MAX_TAG_LENGTH:
+        if conf.MAX_TAG_LENGTH:
             total_length = sum((
                 len(self.cleaned_data.get('namespace', '')),
                 len(self.cleaned_data.get('name', '')),
                 len(self.cleaned_data.get('value', '')),
             ))
-            if total_length > settings.MAX_TAG_LENGTH:
+            if total_length > conf.MAX_TAG_LENGTH:
                 raise forms.ValidationError(
                     _('A tag may be no more than %s characters long.') %
-                        settings.MAX_TAG_LENGTH)
+                        conf.MAX_TAG_LENGTH)
         return self.cleaned_data
 
     def clean_namespace(self):
-        return self._clean_field('namespace', settings.MAX_TAG_NAMESPACE_LENGTH,
+        return self._clean_field('namespace', conf.MAX_TAG_NAMESPACE_LENGTH,
              _('A tag\'s namespace may be no more than %s characters long.'))
 
     def clean_name(self):
-        return self._clean_field('name', settings.MAX_TAG_NAME_LENGTH,
+        return self._clean_field('name', conf.MAX_TAG_NAME_LENGTH,
             _('A tag\'s name may be no more than %s characters long.'))
 
     def clean_value(self):
-        return self._clean_field('value', settings.MAX_TAG_VALUE_LENGTH,
+        return self._clean_field('value', conf.MAX_TAG_VALUE_LENGTH,
             _('A tag\'s value may be no more than %s characters long.'))
+
 
 class TagField(forms.CharField):
     """
@@ -57,6 +60,7 @@ class TagField(forms.CharField):
         else:
             self.default_namespace = None
         super(TagField, self).__init__(*args, **kwargs)
+
     def clean(self, value):
         value = super(TagField, self).clean(value)
         if value == u'':

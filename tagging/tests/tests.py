@@ -7,7 +7,7 @@ from django.db.models import Q
 from django.test import TestCase
 from django.contrib.contenttypes.models import ContentType
 from tagging.forms import TagAdminForm, TagField
-from tagging import settings
+from tagging import conf
 from tagging.generic import fetch_content_objects
 from tagging.models import Tag, TaggedItem
 from tagging.tests.models import Article, Link, Perch, Parrot, FormTest, FormTestNull, DefaultNamespaceTest, DefaultNamespaceTest2, DefaultNamespaceTest3
@@ -556,22 +556,22 @@ class TestGetTagParts(TestCase):
 
 class TestCheckTagLength(TestCase):
     def setUp(self):
-        self.original_max_tag_length = settings.MAX_TAG_LENGTH
-        self.original_max_tag_name_length = settings.MAX_TAG_NAME_LENGTH
-        self.original_max_tag_namespace_length = settings.MAX_TAG_NAMESPACE_LENGTH
-        self.original_max_tag_value_length = settings.MAX_TAG_VALUE_LENGTH
+        self.original_max_tag_length = conf.MAX_TAG_LENGTH
+        self.original_max_tag_name_length = conf.MAX_TAG_NAME_LENGTH
+        self.original_max_tag_namespace_length = conf.MAX_TAG_NAMESPACE_LENGTH
+        self.original_max_tag_value_length = conf.MAX_TAG_VALUE_LENGTH
     
     def tearDown(self):
-        settings.MAX_TAG_LENGTH = self.original_max_tag_length
-        settings.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
-        settings.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
-        settings.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
+        conf.MAX_TAG_LENGTH = self.original_max_tag_length
+        conf.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
+        conf.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
+        conf.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
     
     def test_total_tag_length(self):
-        settings.MAX_TAG_LENGTH = 50
-        settings.MAX_TAG_NAME_LENGTH = 40
-        settings.MAX_TAG_NAMESPACE_LENGTH = 10
-        settings.MAX_TAG_VALUE_LENGTH = 10
+        conf.MAX_TAG_LENGTH = 50
+        conf.MAX_TAG_NAME_LENGTH = 40
+        conf.MAX_TAG_NAMESPACE_LENGTH = 10
+        conf.MAX_TAG_VALUE_LENGTH = 10
         try:
             check_tag_length({'namespace': None, 'name': 'a' * 40, 'value': None})
         except Exception, e:
@@ -1571,16 +1571,16 @@ class TestModelTagField(TestCase):
 
 class TestSettings(TestCase):
     def setUp(self):
-        self.original_force_lower_case_tags = settings.FORCE_LOWERCASE_TAGS
+        self.original_force_lower_case_tags = conf.FORCE_LOWERCASE_TAGS
         self.dead_parrot = Parrot.objects.create(state='dead')
     
     def tearDown(self):
-        settings.FORCE_LOWERCASE_TAGS = self.original_force_lower_case_tags
+        conf.FORCE_LOWERCASE_TAGS = self.original_force_lower_case_tags
     
     def test_force_lowercase_tags(self):
         """ Test forcing tags to lowercase. """
         
-        settings.FORCE_LOWERCASE_TAGS = True
+        conf.FORCE_LOWERCASE_TAGS = True
         
         Tag.objects.update_tags(self.dead_parrot, 'foO bAr Ter')
         tags = Tag.objects.get_for_object(self.dead_parrot)
@@ -2217,16 +2217,16 @@ class TestTagUsageForQuerySet(TestCase):
 
 class TestTagFieldInForms(TestCase):
     def setUp(self):
-        self.original_max_tag_length = settings.MAX_TAG_LENGTH
-        self.original_max_tag_name_length = settings.MAX_TAG_NAME_LENGTH
-        self.original_max_tag_namespace_length = settings.MAX_TAG_NAMESPACE_LENGTH
-        self.original_max_tag_value_length = settings.MAX_TAG_VALUE_LENGTH
+        self.original_max_tag_length = conf.MAX_TAG_LENGTH
+        self.original_max_tag_name_length = conf.MAX_TAG_NAME_LENGTH
+        self.original_max_tag_namespace_length = conf.MAX_TAG_NAMESPACE_LENGTH
+        self.original_max_tag_value_length = conf.MAX_TAG_VALUE_LENGTH
     
     def tearDown(self):
-        settings.MAX_TAG_LENGTH = self.original_max_tag_length
-        settings.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
-        settings.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
-        settings.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
+        conf.MAX_TAG_LENGTH = self.original_max_tag_length
+        conf.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
+        conf.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
+        conf.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
 
     def test_tag_field_in_modelform(self):
         # Ensure that automatically created forms use TagField
@@ -2270,10 +2270,10 @@ class TestTagFieldInForms(TestCase):
         w51 = w50 + 'n'
         w10 = w50[:10]
         w11 = w50[:11]
-        settings.MAX_TAG_LENGTH = 150
-        settings.MAX_TAG_NAME_LENGTH = 50
-        settings.MAX_TAG_NAMESPACE_LENGTH = 50
-        settings.MAX_TAG_VALUE_LENGTH = 50
+        conf.MAX_TAG_LENGTH = 150
+        conf.MAX_TAG_NAME_LENGTH = 50
+        conf.MAX_TAG_NAMESPACE_LENGTH = 50
+        conf.MAX_TAG_VALUE_LENGTH = 50
 
         self.assertEquals(t.clean('foo'), u'foo')
         self.assertEquals(t.clean('foo bar baz'), u'foo bar baz')
@@ -2308,7 +2308,7 @@ class TestTagFieldInForms(TestCase):
             raise e
         else:
             raise self.failureException('a ValidationError exception was supposed to have been raised.')
-        settings.MAX_TAG_LENGTH = 149
+        conf.MAX_TAG_LENGTH = 149
         try:
             t.clean('foo %s:%s=%s bar' % (w50, w50, w50))
         except forms.ValidationError, ve:
@@ -2336,7 +2336,7 @@ class TestTagFieldInForms(TestCase):
         t = TagField(default_namespace='foo')
         self.assertEquals(t.clean('bar'), 'bar')
 
-        settings.MAX_TAG_NAMESPACE_LENGTH = 10
+        conf.MAX_TAG_NAMESPACE_LENGTH = 10
         t = TagField(default_namespace='qwertyuiop')
         self.assertEquals(t.clean('bar'), 'bar')
 
@@ -2349,26 +2349,26 @@ class TestTagFieldInForms(TestCase):
 
 class TestTagAdminForm(TestCase):
     def setUp(self):
-        self.original_max_tag_length = settings.MAX_TAG_LENGTH
-        self.original_max_tag_name_length = settings.MAX_TAG_NAME_LENGTH
-        self.original_max_tag_namespace_length = settings.MAX_TAG_NAMESPACE_LENGTH
-        self.original_max_tag_value_length = settings.MAX_TAG_VALUE_LENGTH
+        self.original_max_tag_length = conf.MAX_TAG_LENGTH
+        self.original_max_tag_name_length = conf.MAX_TAG_NAME_LENGTH
+        self.original_max_tag_namespace_length = conf.MAX_TAG_NAMESPACE_LENGTH
+        self.original_max_tag_value_length = conf.MAX_TAG_VALUE_LENGTH
     
     def tearDown(self):
-        settings.MAX_TAG_LENGTH = self.original_max_tag_length
-        settings.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
-        settings.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
-        settings.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
+        conf.MAX_TAG_LENGTH = self.original_max_tag_length
+        conf.MAX_TAG_NAME_LENGTH = self.original_max_tag_name_length
+        conf.MAX_TAG_NAMESPACE_LENGTH = self.original_max_tag_namespace_length
+        conf.MAX_TAG_VALUE_LENGTH = self.original_max_tag_value_length
     
     def test_form_fields_validation(self):
         w50 = 'qwertyuiopasdfghjklzxcvbnmqwertyuiopasdfghjklzxcvb'
         w51 = w50 + 'n'
         w30 = w50[:30]
         w31 = w50[:31]
-        settings.MAX_TAG_LENGTH = 90
-        settings.MAX_TAG_NAME_LENGTH = 30
-        settings.MAX_TAG_NAMESPACE_LENGTH = 30
-        settings.MAX_TAG_VALUE_LENGTH = 30
+        conf.MAX_TAG_LENGTH = 90
+        conf.MAX_TAG_NAME_LENGTH = 30
+        conf.MAX_TAG_NAMESPACE_LENGTH = 30
+        conf.MAX_TAG_VALUE_LENGTH = 30
 
         tag_parts = {'name': None, 'namespace': None, 'value': None}
 
@@ -2428,7 +2428,7 @@ class TestTagAdminForm(TestCase):
         self.assertEquals(len(f['name'].errors), 1)
         self.assertEquals(len(f['value'].errors), 1)
 
-        settings.MAX_TAG_LENGTH = 89
+        conf.MAX_TAG_LENGTH = 89
 
         tag_parts['name'] = w30
         tag_parts['namespace'] = w30
@@ -2443,10 +2443,10 @@ class TestTagAdminForm(TestCase):
 
         # more than 50 chars are not allowed because the model fields
         # cannot store longer values.
-        settings.MAX_TAG_LENGTH = 180
-        settings.MAX_TAG_NAMESPACE_LENGTH = 60
-        settings.MAX_TAG_NAME_LENGTH = 60
-        settings.MAX_TAG_VALUE_LENGTH = 60
+        conf.MAX_TAG_LENGTH = 180
+        conf.MAX_TAG_NAMESPACE_LENGTH = 60
+        conf.MAX_TAG_NAME_LENGTH = 60
+        conf.MAX_TAG_VALUE_LENGTH = 60
 
         tag_parts['name'] = w50
         tag_parts['namespace'] = w50
