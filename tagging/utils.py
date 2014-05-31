@@ -11,7 +11,7 @@ import types
 
 from django.db.models import Q
 from django.db.models.query import QuerySet
-from django.utils.encoding import force_unicode
+from django.utils.text import force_text
 from django.utils.translation import ugettext as _
 
 RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'[:=]|"[^"]*"|[^,\s:="]+')
@@ -48,15 +48,15 @@ def parse_tag_input(input, default_namespace=None, keep_quotes=None):
             default_namespace,
             keep_quotes=keep_quotes) or None
 
-    input = force_unicode(input)
+    input = force_text(input)
 
     # Special case - if there are no commas, colons or double quotes in the
     # input, we don't *do* a recall... I mean, we know we only need to
     # split on spaces.
-    if u',' not in input and u'"' not in input and \
+    if ',' not in input and '"' not in input and \
         ':' not in input and '=' not in input and \
         not [part for part in keep_quotes if part in input]:
-        words = list(set(split_strip(input, u' ')))
+        words = list(set(split_strip(input, ' ')))
         if default_namespace:
             words = ['%s:%s' % (default_namespace, word) for word in words]
         words.sort()
@@ -185,7 +185,7 @@ def normalize_tag_part(input, stop_chars=':=', keep_quotes=None):
     return input
 
 
-def split_strip(input, delimiter=u','):
+def split_strip(input, delimiter=','):
     """
     Splits ``input`` on ``delimiter``, stripping each resulting string
     and returning a list of non-empty strings.
@@ -269,9 +269,9 @@ def edit_string_for_tags(tags, default_namespace=None,
             name = '%s=%s' % (name, fields['value'])
         names.append(name)
     if use_commas:
-        glue = u', '
+        glue = ', '
     else:
-        glue = u' '
+        glue = ' '
     return glue.join(names)
 
 
@@ -353,7 +353,7 @@ def get_tag_list(tags, wildcard=None, default_namespace=None):
         if len(contents) == 1:
             if 'string' in contents:
                 q = get_tag_filter_lookup(
-                    [force_unicode(tag) for tag in tags],
+                    [force_text(tag) for tag in tags],
                     wildcard=wildcard, default_namespace=default_namespace)
                 if q is None:
                     return []
@@ -396,9 +396,9 @@ def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
     explicitly have an empty namespace (like ``:name``).
     """
     if wildcard == True:
-        use_wildcard = u'*'
+        use_wildcard = '*'
     if wildcard:
-        wildcard = force_unicode(wildcard)
+        wildcard = force_text(wildcard)
         keep_quotes = (wildcard,)
     else:
         keep_quotes = ()

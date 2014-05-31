@@ -518,4 +518,4 @@ class TaggedItem(models.Model):
         verbose_name_plural = _('tagged items')
 
     def __unicode__(self):
-        return u'%s [%s]' % (self.object, self.tag)
+        return '%s [%s]' % (self.object, self.tag)
