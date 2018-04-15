@@ -6,7 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db.models import signals, Q
 from django.db.models.fields import CharField
 
-from django.utils.importlib import import_module
+from importlib import import_module
 from django.utils.translation import ugettext_lazy as _
 
 from tagging import conf, forms
