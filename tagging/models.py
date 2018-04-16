@@ -4,7 +4,10 @@ from __future__ import unicode_literals, absolute_import
 Models and managers for generic tagging.
 """
 
-from django.contrib.contenttypes.fields import GenericForeignKey
+try:
+    from django.contrib.contenttypes.generic import GenericForeignKey
+except ImportError:
+    from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection, models
 from django.utils.translation import ugettext_lazy as _
@@ -494,8 +497,8 @@ class TaggedItem(models.Model):
     """
     Holds the relationship between a tag and the item being tagged.
     """
-    tag          = models.ForeignKey(Tag, verbose_name=_('tag'), related_name='items')
-    content_type = models.ForeignKey(ContentType, verbose_name=_('content type'))
+    tag          = models.ForeignKey(Tag, verbose_name=_('tag'), related_name='items', on_delete=models.CASCADE)
+    content_type = models.ForeignKey(ContentType, verbose_name=_('content type'), on_delete=models.CASCADE)
     object_id    = models.PositiveIntegerField(_('object id'), db_index=True)
     object       = GenericForeignKey('content_type', 'object_id')
 
