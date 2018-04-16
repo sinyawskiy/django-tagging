@@ -11,7 +11,10 @@ import types
 
 from django.db.models import Q
 from django.db.models.query import QuerySet
-from django.utils.encoding import force_unicode
+try:
+    from django.utils.encoding import force_unicode
+except ImportError: # django 2 support
+    from django.utils.encoding import force_text as force_unicode
 from django.utils.translation import ugettext as _
 
 RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'[:=]|"[^"]*"|[^,\s:="]+')
