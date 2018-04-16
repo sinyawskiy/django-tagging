@@ -158,33 +158,23 @@ class TagManager(models.Manager):
         """
         Obtain a list of tags associated with instances of a model
         contained in the given queryset.
-
         If ``counts`` is True, a ``count`` attribute will be added to
         each tag, indicating how many times it has been used against
         the Model class in question.
-
         If ``min_count`` is given, only tags which have a ``count``
         greater than or equal to ``min_count`` will be returned.
         Passing a value for ``min_count`` implies ``counts=True``.
         """
-
-        if getattr(queryset.query, 'get_compiler', None):
-            # Django 1.2+
-            compiler = queryset.query.get_compiler(using='default')
-            extra_joins = ' '.join(compiler.get_from_clause()[0][1:])
-            where, params = queryset.query.where.as_sql(
-                compiler.quote_name_unless_alias, compiler.connection
-            )
-        else:
-            # Django pre-1.2
-            extra_joins = ' '.join(queryset.query.get_from_clause()[0][1:])
-            where, params = queryset.query.where.as_sql()
+        compiler = queryset.query.get_compiler(using=queryset.db)
+        where, params = compiler.compile(queryset.query.where)
+        extra_joins = ' '.join(compiler.get_from_clause()[0][1:])
 
         if where:
             extra_criteria = 'AND %s' % where
         else:
             extra_criteria = ''
-        return self._get_usage(queryset.model, counts, min_count, extra_joins, extra_criteria, params)
+        return self._get_usage(queryset.model, counts, min_count,
+                               extra_joins, extra_criteria, params)
 
     def related_for_model(self, tags, model, counts=False, min_count=None,
                           wildcard=None, default_namespace=None):
