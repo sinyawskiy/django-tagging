@@ -8,7 +8,7 @@ calculation.
 import re
 import math
 import types
-
+from six import string_types
 from django.db.models import Q
 from django.db.models.query import QuerySet
 try:
@@ -221,7 +221,7 @@ def edit_string_for_tags(tags, default_namespace=None,
         filter_namespaces = ()
     if exclude_namespaces is None:
         exclude_namespaces = ()
-    if isinstance(tags, types.StringTypes):
+    if isinstance(tags, string_types):
         tags = [get_tag_parts(tag)
                 for tag in parse_tag_input(tags,
                     default_namespace=default_namespace)]
@@ -336,7 +336,7 @@ def get_tag_list(tags, wildcard=None, default_namespace=None):
         return [tags]
     elif isinstance(tags, QuerySet) and tags.model is Tag:
         return tags
-    elif isinstance(tags, types.StringTypes):
+    elif isinstance(tags, string_types):
         q = get_tag_filter_lookup(tags,
             wildcard=wildcard, default_namespace=default_namespace)
         if q is None:
@@ -347,7 +347,7 @@ def get_tag_list(tags, wildcard=None, default_namespace=None):
             return tags
         contents = set()
         for item in tags:
-            if isinstance(item, types.StringTypes):
+            if isinstance(item, string_types):
                 contents.add('string')
             elif isinstance(item, Tag):
                 contents.add('tag')
@@ -405,7 +405,7 @@ def get_tag_filter_lookup(tags, wildcard=None, default_namespace=None):
         keep_quotes = (wildcard,)
     else:
         keep_quotes = ()
-    if isinstance(tags, types.StringTypes):
+    if isinstance(tags, string_types):
         tags = parse_tag_input(tags,
             keep_quotes=keep_quotes,
             default_namespace=default_namespace)
@@ -460,7 +460,7 @@ def get_tag(tag, default_namespace=None):
         return tag
 
     try:
-        if isinstance(tag, types.StringTypes):
+        if isinstance(tag, string_types):
             return Tag.objects.get(**get_tag_parts(tag,
                 default_namespace=default_namespace))
         elif isinstance(tag, (types.IntType, types.LongType)):
