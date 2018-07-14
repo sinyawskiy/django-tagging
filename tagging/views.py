@@ -3,18 +3,10 @@ from __future__ import unicode_literals, absolute_import
 
 import json
 
-from django.http import HttpResponse
+from django.http import JsonResponse
 from django.utils.datastructures import MultiValueDictKeyError
 
 from tagging.models import Tag
-
-
-class JsonResponse(HttpResponse):
-    """
-    HttpResponse descendant, which return response with ``application/json`` mimetype.
-    """
-    def __init__(self, data):
-        super(JsonResponse, self).__init__(content=json.dumps(data), mimetype='application/json')
 
 
 def tag_it_suggest(request):
