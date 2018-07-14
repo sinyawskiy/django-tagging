@@ -24,7 +24,7 @@ def tag_it_suggest(request):
         except MultiValueDictKeyError:
             pass
 
-    return JsonResponse([x.encode('utf-8') for x in tags])
+    return JsonResponse([x.encode('utf-8') for x in tags], safe=False)
 
 
 def typeahead_suggest(request):
