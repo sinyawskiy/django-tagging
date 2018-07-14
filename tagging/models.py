@@ -43,12 +43,12 @@ class TagManager(models.Manager):
 
         # Remove tags which no longer apply
         tags_for_removal = [tag for tag in current_tags \
-                            if unicode(tag) not in updated_tag_names]
+                            if str(tag) not in updated_tag_names]
         if len(tags_for_removal):
             TaggedItem._default_manager.filter(content_type__pk=ctype.pk,
                 object_id=obj.pk, tag__in=tags_for_removal).delete()
         # Add new tags
-        current_tag_names = [unicode(tag) for tag in current_tags]
+        current_tag_names = [str(tag) for tag in current_tags]
         for tag_name in updated_tag_names:
             if tag_name not in current_tag_names:
                 tag, created = self.get_or_create(**get_tag_parts(tag_name))
@@ -468,7 +468,7 @@ class TaggedItemManager(models.Manager):
 ##########
 # Models #
 ##########
-
+@python_2_unicode_compatible
 class Tag(models.Model):
     """
     A tag.
@@ -485,7 +485,7 @@ class Tag(models.Model):
         verbose_name = _('tag')
         verbose_name_plural = _('tags')
 
-    def __unicode__(self):
+    def __str__(self):
         name = normalize_tag_part(self.name)
         if self.namespace:
             name = '%s:%s' % (normalize_tag_part(self.namespace), name)
@@ -493,6 +493,7 @@ class Tag(models.Model):
             name = '%s=%s' % (name, normalize_tag_part(self.value))
         return name
 
+@python_2_unicode_compatible
 class TaggedItem(models.Model):
     """
     Holds the relationship between a tag and the item being tagged.
@@ -510,5 +511,5 @@ class TaggedItem(models.Model):
         verbose_name = _('tagged item')
         verbose_name_plural = _('tagged items')
 
-    def __unicode__(self):
+    def __str__(self):
         return u'%s [%s]' % (self.object, self.tag)
