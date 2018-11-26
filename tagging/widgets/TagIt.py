@@ -15,7 +15,7 @@ from tagging.widgets.base import TagWidgetBase
 
 class TagWidget(TagWidgetBase):
 
-    def render(self, name, value, attrs=None):
+    def render(self, name, value, attrs=None, renderer=None):
         """ Render HTML code """
 
         case_sensitive = 'true' if conf.FORCE_TAGS is not None else 'false'
