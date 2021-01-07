@@ -1,6 +1,5 @@
 #coding: utf-8
 from __future__ import unicode_literals, absolute_import
-from django.utils.encoding import python_2_unicode_compatible
 """
 Models and managers for generic tagging.
 """
@@ -469,7 +468,6 @@ class TaggedItemManager(models.Manager):
 ##########
 # Models #
 ##########
-@python_2_unicode_compatible
 class Tag(models.Model):
     """
     A tag.
@@ -494,7 +492,6 @@ class Tag(models.Model):
             name = '%s=%s' % (name, normalize_tag_part(self.value))
         return name
 
-@python_2_unicode_compatible
 class TaggedItem(models.Model):
     """
     Holds the relationship between a tag and the item being tagged.
