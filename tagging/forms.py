@@ -4,8 +4,10 @@ from __future__ import unicode_literals, absolute_import
 Tagging components for Django's form library.
 """
 from django import forms
-from django.utils.translation import ugettext as _
-
+try:
+    from django.utils.translation import ugettext_lazy as _
+except ImportError:
+    from django.utils.translation import gettext_lazy as _
 from tagging import conf
 from tagging.models import Tag
 from tagging.utils import check_tag_length, get_tag_parts, parse_tag_input
