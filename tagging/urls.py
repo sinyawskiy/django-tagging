@@ -1,7 +1,10 @@
 #coding: utf-8
 from __future__ import unicode_literals, absolute_import
 from tagging.views import tag_it_suggest, typeahead_suggest
-from django.conf.urls import url
+try:
+    from django.conf.urls import url
+except ImportError:
+    from django.urls import re_path as url
 
 app_name = 'tagging'
 urlpatterns = [
