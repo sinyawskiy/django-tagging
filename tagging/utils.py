@@ -15,7 +15,10 @@ try:
     from django.utils.encoding import force_unicode
 except ImportError: # django 2 support
     from django.utils.encoding import force_text as force_unicode
-from django.utils.translation import ugettext as _
+try:
+    from django.utils.translation import ugettext as _
+except ImportError:
+    from django.utils.translation import gettext as _
 
 RE_TAG_PART_TOKEN = re.compile(r"^(%s)(.*)$" % r'[:=]|"[^"]*"|[^,\s:="]+')
 RE_SPACE_TOKEN = re.compile(r"^(%s)(.*)$" % r"\s+")
