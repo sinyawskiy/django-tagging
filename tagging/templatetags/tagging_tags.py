@@ -4,8 +4,11 @@ except ImportError:
     from django.apps import apps
     get_model = apps.get_model
 from django.template import Library, Node, TemplateSyntaxError, Variable
-from django.utils.translation import ugettext as _
-
+try:
+    from django.utils.translation import ugettext as _
+except ImportError:
+    from django.utils.translation import gettext as _
+    
 from tagging.models import Tag, TaggedItem
 from tagging.utils import LINEAR, LOGARITHMIC
 
