@@ -10,9 +10,10 @@ try:
     from django.utils.importlib import import_module
 except ImportError:
     from importlib import import_module
-    
-from django.utils.translation import ugettext_lazy as _
-
+try:    
+    from django.utils.translation import ugettext_lazy as _
+except ImportError:
+    from django.utils.translation import gettext_lazy as _
 from tagging import conf, forms
 from tagging.models import Tag
 from tagging.utils import edit_string_for_tags
